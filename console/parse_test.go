@@ -126,8 +126,8 @@ func TestValidateSourcePathSymlinks(t *testing.T) {
 	if err := validateSourcePath(dirLink); err == nil {
 		t.Error("validateSourcePath() принял конечную ссылку на каталог")
 	}
-	if err := validateSourcePath(filepath.Join(dirLink, filepath.Base(intermediateTarget))); err != nil {
-		t.Errorf("validateSourcePath() отклонил ссылку в промежуточном компоненте: %v", err)
+	if err := validateSourcePath(filepath.Join(dirLink, filepath.Base(intermediateTarget))); err == nil {
+		t.Error("validateSourcePath() принял ссылку в промежуточном компоненте")
 	}
 }
 
@@ -261,9 +261,13 @@ func TestParseHelpAndErrors(t *testing.T) {
 
 func TestParseReturnsOutputErrors(t *testing.T) {
 	writeErr := errors.New("запись недоступна")
-	_, proceed, err := Parse([]string{"--help"}, errorWriter{err: writeErr}, &bytes.Buffer{})
+	var stderr bytes.Buffer
+	_, proceed, err := Parse([]string{"--help"}, errorWriter{err: writeErr}, &stderr)
 	if proceed || !errors.Is(err, writeErr) {
 		t.Errorf("ошибка справки = %v, proceed=%t; требуется ошибка writer", err, proceed)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("сбой вывода справки не должен печататься в stderr: %q", stderr.String())
 	}
 
 	_, proceed, err = Parse(nil, &bytes.Buffer{}, errorWriter{err: writeErr})
