@@ -6,13 +6,15 @@ import (
 )
 
 // PrintHelp печатает по-русски формат
-// dslparser [--replace] [--depth N] <path>, значения флагов и правило глубины;
+// dslparser [--replace] [--depth N] <path>, значения флагов, правило глубины
+// и обозначение текущего каталога пустым путём;
 // возвращает ошибку записи в output.
 func PrintHelp(output io.Writer) error {
 	_, err := fmt.Fprint(output, `Использование: dslparser [--replace] [--depth N] <path>
 
 Аргументы:
   <path>       путь к обычному TXT-файлу или каталогу
+               пустая строка ("") означает текущий каталог
 
 Флаги:
   --replace    разрешить повторный разбор и замену целевого JSON

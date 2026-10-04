@@ -12,6 +12,7 @@ func TestPrintHelp(t *testing.T) {
 
 Аргументы:
   <path>       путь к обычному TXT-файлу или каталогу
+               пустая строка ("") означает текущий каталог
 
 Флаги:
   --replace    разрешить повторный разбор и замену целевого JSON
@@ -42,6 +43,7 @@ func TestPrintHelpDescribesCommandOptions(t *testing.T) {
 	parts := []string{
 		"dslparser [--replace] [--depth N] <path>",
 		"путь к обычному TXT-файлу или каталогу",
+		`пустая строка ("") означает текущий каталог`,
 		"--replace",
 		"--depth N",
 		"--help, -h",
