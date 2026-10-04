@@ -41,7 +41,10 @@ func formatFileLine(summary fileSummary) string {
 	line := fmt.Sprintf("%s: %s | путь: %s | строк: %s | ошибок: %d",
 		status, actionText(summary.action), path, lineCount, summary.errors)
 	if failed {
-		failure := strings.NewReplacer("\r", `\r`, "\n", `\n`).Replace(summary.failure.Error())
+		failure := "причина не указана"
+		if summary.failure != nil {
+			failure = strings.NewReplacer("\r", `\r`, "\n", `\n`).Replace(summary.failure.Error())
+		}
 		line += " | причина: " + failure
 	}
 	if summary.fatal != nil {

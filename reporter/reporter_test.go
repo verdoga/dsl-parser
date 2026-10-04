@@ -137,6 +137,20 @@ func TestReporterInstancesKeepIndependentCounters(t *testing.T) {
 	}
 }
 
+func TestReporterNotWrittenWithoutReason(t *testing.T) {
+	var code int
+	output := captureReporterOutput(t, func() {
+		r := reporter.New()
+		r.Record(model.Result{}, storage.Report{Action: storage.ActionNotWritten})
+		code = r.Finish()
+	})
+	want := "ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок: 0 | причина: причина не указана\n" +
+		"ИТОГО | всего: 1 | успех: 0 | ошибка: 1\n"
+	if output != want || code != 1 {
+		t.Fatalf("вывод = %q, код = %d; требуется %q, код 1", output, code, want)
+	}
+}
+
 func captureReporterOutput(t *testing.T, run func()) string {
 	t.Helper()
 	capture, err := os.CreateTemp(t.TempDir(), "stdout")
