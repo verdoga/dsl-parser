@@ -14,6 +14,7 @@ type registry struct {
 }
 
 // NewRegistry создаёт реестр и регистрирует все известные пакету диагностики.
+// Встроенный набор включает P001–P015 и IO001.
 func NewRegistry() Registry {
 	descriptions := builtinDiagnostics()
 	r := registry{diagnostics: make(map[Code]diagnostic, len(descriptions))}

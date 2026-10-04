@@ -27,7 +27,6 @@ func TestGrammarCollectionEmptyCollections(t *testing.T) {
 			orchestrationFuncs: []OrchestrationFunc{},
 			lineTypeFuncs:      []LineTypeFunc{},
 			lineParserFuncs:    []LineParserFunc{},
-			assertions:         []Assertion{},
 		}},
 	}
 	for _, test := range tests {
@@ -40,7 +39,6 @@ func TestGrammarCollectionEmptyCollections(t *testing.T) {
 				{"OrchestrationFuncs", len(test.grammar.OrchestrationFuncs())},
 				{"LineTypeFuncs", len(test.grammar.LineTypeFuncs())},
 				{"LineParserFuncs", len(test.grammar.LineParserFuncs())},
-				{"Assertions", len(test.grammar.Assertions())},
 			}
 			for _, result := range lengths {
 				if result.length != 0 {
@@ -132,65 +130,27 @@ func assertGrammarFunctionSlice[F ~func(GrammarContext) bool](t *testing.T, coll
 	}
 }
 
-func TestGrammarCollectionAssertionsPreserveOrderAndAreIndependent(t *testing.T) {
-	var calls []string
-	first := func(AssertionInput) bool {
-		calls = append(calls, "first")
-		return true
+func TestGrammarCollectionAssertionsPreserveRoleIDs(t *testing.T) {
+	tests := []struct {
+		name          string
+		enterParentID AssertionID
+		leaveParentID AssertionID
+	}{
+		{name: "empty roles"},
+		{name: "distinct roles", enterParentID: "enter", leaveParentID: "leave"},
+		{name: "roles are not sorted", enterParentID: "z-enter", leaveParentID: "a-leave"},
+		{name: "empty enter", leaveParentID: "leave"},
+		{name: "empty leave", enterParentID: "enter"},
+		{name: "same IDs", enterParentID: "same", leaveParentID: "same"},
+		{name: "exact spelling", enterParentID: " Enter ", leaveParentID: "LEAVE"},
 	}
-	second := func(AssertionInput) bool {
-		calls = append(calls, "second")
-		return false
-	}
-	g := grammarCollection{assertions: []Assertion{
-		{ID: "duplicate", Check: first},
-		{ID: "missing"},
-		{ID: "duplicate", Check: second},
-		{ID: "last", Check: first},
-	}}
-	returned := g.Assertions()
-	if len(calls) != 0 {
-		t.Fatal("Assertions() вызвал проверки")
-	}
-	if len(returned) != 4 {
-		t.Fatalf("Assertions() вернул %d утверждений, требуется 4", len(returned))
-	}
-	returned[0].ID = "changed"
-	returned[0].Check = nil
-	returned[1].Check = first
-	returned[2] = Assertion{ID: "replacement", Check: first}
-	returned[3] = Assertion{}
-
-	for attempt := 1; attempt <= 2; attempt++ {
-		calls = nil
-		fresh := g.Assertions()
-		if len(calls) != 0 {
-			t.Fatal("Повторный Assertions() вызвал проверки")
-		}
-		if len(fresh) != 4 {
-			t.Fatalf("Assertions() вернул %d утверждений, требуется 4", len(fresh))
-		}
-		for i, wantID := range []AssertionID{"duplicate", "missing", "duplicate", "last"} {
-			if fresh[i].ID != wantID {
-				t.Errorf("Утверждение %d: ID = %q, требуется %q", i, fresh[i].ID, wantID)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			g := grammarCollection{enterParentID: test.enterParentID, leaveParentID: test.leaveParentID}
+			enter, leave := g.Assertions()
+			if enter != test.enterParentID || leave != test.leaveParentID {
+				t.Fatalf("Assertions() = (%q, %q), требуется (%q, %q)", enter, leave, test.enterParentID, test.leaveParentID)
 			}
-			if i == 1 {
-				if fresh[i].Check != nil {
-					t.Fatal("Отсутствующая проверка заменена")
-				}
-				continue
-			}
-			if fresh[i].Check == nil {
-				t.Fatalf("Проверка %d потеряна", i)
-			}
-			want := i != 2
-			if got := fresh[i].Check(AssertionInput{}); got != want {
-				t.Errorf("Проверка %d вернула %t, требуется %t", i, got, want)
-			}
-		}
-		if !slices.Equal(calls, []string{"first", "second", "first"}) {
-			t.Errorf("Порядок проверок = %v, требуется [first second first]", calls)
-		}
-		fresh[0] = Assertion{}
+		})
 	}
 }

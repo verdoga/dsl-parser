@@ -1,11 +1,15 @@
 package diagnostics
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 func TestRegistryLookupFindsAllBuiltinCodes(t *testing.T) {
 	codes := []Code{
 		P001, P002, P003, P004, P005, P006, P007, P008,
-		P009, P010, P011, P012, P013, P014, IO001,
+		P009, P010, P011, P012, P013, P014, P015, IO001,
 	}
 	r := NewRegistry()
 
@@ -31,7 +35,7 @@ func TestRegistryLookupRejectsUnregisteredCodes(t *testing.T) {
 		code Code
 	}{
 		{name: "empty"},
-		{name: "unknown parser code", code: "P015"},
+		{name: "unknown parser code", code: "P016"},
 		{name: "unknown IO code", code: "IO002"},
 		{name: "arbitrary code", code: "UNKNOWN"},
 		{name: "lowercase parser code", code: "p001"},
@@ -61,7 +65,7 @@ func TestRegistryLookupRejectsUnregisteredCodes(t *testing.T) {
 func TestRegistryLookupIsStableAcrossCallsAndRegistries(t *testing.T) {
 	codes := []Code{
 		P001, P002, P003, P004, P005, P006, P007, P008,
-		P009, P010, P011, P012, P013, P014, IO001,
+		P009, P010, P011, P012, P013, P014, P015, IO001,
 	}
 	first := NewRegistry()
 	second := NewRegistry()
@@ -91,6 +95,23 @@ func TestRegistryLookupIsStableAcrossCallsAndRegistries(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestRegistryP015CheckIsUnavailable(t *testing.T) {
+	description, found := NewRegistry().Lookup(P015)
+	if !found || description == nil {
+		t.Fatal("Lookup(P015) не вернул встроенное описание")
+	}
+	if description.HasCheck() {
+		t.Fatal("Для P015 зарегистрирована непредусмотренная функция проверки")
+	}
+	matched, err := description.Check(strings.NewReader(""))
+	if matched {
+		t.Error("Check() вернул true при отсутствии функции проверки")
+	}
+	if !errors.Is(err, ErrCheckUnavailable) {
+		t.Errorf("Check() вернул ошибку %v, требуется ErrCheckUnavailable", err)
 	}
 }
 

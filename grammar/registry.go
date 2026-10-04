@@ -10,16 +10,19 @@ func NewRegistry() Registry {
 	return make(Registry)
 }
 
-// Register сохраняет набор функций грамматики для версии DSL.
+// Register сохраняет набор функций грамматики и ID двух структурных ролей для версии DSL.
 // Повторная регистрация той же версии заменяет ранее сохранённый набор.
 // Все переданные срезы копируются с сохранением порядка элементов.
+// enterParentID и leaveParentID сохраняются без изменения; функции утверждений
+// не регистрируются. Наличие обязательных ID и их проверок проверяет парсер.
 func (r Registry) Register(
 	version string,
 	detectionFuncs []DetectionFunc,
 	orchestrationFuncs []OrchestrationFunc,
 	lineTypeFuncs []LineTypeFunc,
 	lineParserFuncs []LineParserFunc,
-	assertions []Assertion,
+	enterParentID AssertionID,
+	leaveParentID AssertionID,
 ) {
 	r[version] = grammarCollection{
 		version:            version,
@@ -27,7 +30,8 @@ func (r Registry) Register(
 		orchestrationFuncs: slices.Clone(orchestrationFuncs),
 		lineTypeFuncs:      slices.Clone(lineTypeFuncs),
 		lineParserFuncs:    slices.Clone(lineParserFuncs),
-		assertions:         slices.Clone(assertions),
+		enterParentID:      enterParentID,
+		leaveParentID:      leaveParentID,
 	}
 }
 

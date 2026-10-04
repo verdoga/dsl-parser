@@ -15,14 +15,16 @@ func TestBuiltinGr12RegistersAndReplacesOnlyItsVersion(t *testing.T) {
 	registry := grammar.NewRegistry()
 	calls := 0
 	action := func(grammar.GrammarContext) bool { calls++; return true }
-	assertion := grammar.Assertion{ID: "other", Check: func(grammar.AssertionInput) bool { calls++; return true }}
 	for _, version := range []string{"1.1", "1.2"} {
 		registry.Register(version, []grammar.DetectionFunc{action}, []grammar.OrchestrationFunc{action},
-			[]grammar.LineTypeFunc{action}, []grammar.LineParserFunc{action}, []grammar.Assertion{assertion})
+			[]grammar.LineTypeFunc{action}, []grammar.LineParserFunc{action}, "other-enter", "other-leave")
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		gr12.BuiltinGr12(registry)
+		assertions := gr12.BuiltinGr12(registry)
 		assertRegisteredGr12(t, registry)
+		if len(assertions) != 2 || assertions[gr12.IncreasesNesting] == nil || assertions[gr12.DecreasesNesting] == nil {
+			t.Fatal("Регистрация не вернула обе функции утверждений")
+		}
 		if calls != 0 || len(registry) != 2 {
 			t.Fatal("Регистрация вызвала обработчики или изменила набор версий")
 		}
@@ -35,10 +37,14 @@ func TestBuiltinGr12RegistersAndReplacesOnlyItsVersion(t *testing.T) {
 		}
 	}
 	other, found := registry.Lookup("1.1")
-	if !found || other.Version() != "1.1" || len(other.DetectionFuncs()) != 1 || len(other.OrchestrationFuncs()) != 1 || len(other.LineTypeFuncs()) != 1 || len(other.LineParserFuncs()) != 1 || len(other.Assertions()) != 1 || other.Assertions()[0].ID != "other" {
+	if !found || other.Version() != "1.1" || len(other.DetectionFuncs()) != 1 || len(other.OrchestrationFuncs()) != 1 || len(other.LineTypeFuncs()) != 1 || len(other.LineParserFuncs()) != 1 {
 		t.Fatal("Изменён набор другой версии")
 	}
-	if !other.DetectionFuncs()[0](nil) || !other.OrchestrationFuncs()[0](nil) || !other.LineTypeFuncs()[0](nil) || !other.LineParserFuncs()[0](nil) || !other.Assertions()[0].Check(grammar.AssertionInput{}) || calls != 5 {
+	enter, leave := other.Assertions()
+	if enter != "other-enter" || leave != "other-leave" {
+		t.Fatal("Изменены роли утверждений другой версии")
+	}
+	if !other.DetectionFuncs()[0](nil) || !other.OrchestrationFuncs()[0](nil) || !other.LineTypeFuncs()[0](nil) || !other.LineParserFuncs()[0](nil) || calls != 4 {
 		t.Fatal("Не сохранены функции другой версии")
 	}
 	if _, found := grammar.NewRegistry().Lookup("1.2"); found {
@@ -128,10 +134,15 @@ func TestBuiltinGr12ExposesSeparateClassificationAndParsing(t *testing.T) {
 	}
 }
 
-func TestBuiltinGr12RegistersWorkingNamedAssertions(t *testing.T) {
+func TestBuiltinGr12ReturnsWorkingNamedAssertions(t *testing.T) {
 	registry := grammar.NewRegistry()
-	gr12.BuiltinGr12(registry)
+	assertions := gr12.BuiltinGr12(registry)
 	assertRegisteredGr12(t, registry)
+	registered, _ := registry.Lookup("1.2")
+	enter, leave := registered.Assertions()
+	if len(assertions) != 2 || assertions[enter] == nil || assertions[leave] == nil {
+		t.Fatal("Карта функций не соответствует зарегистрированным ролям")
+	}
 	block := runRegisteredGr12(t, registry, "@note Tip {").Line()
 	task := runRegisteredGr12(t, registry, "@task 1").Line()
 	for _, test := range []struct {
@@ -154,11 +165,60 @@ func TestBuiltinGr12RegistersWorkingNamedAssertions(t *testing.T) {
 	} {
 		t.Run(string(test.id)+"/"+test.source, func(t *testing.T) {
 			context := runRegisteredGr12(t, registry, test.source)
-			registered, _ := registry.Lookup("1.2")
-			context.SetAssertions(registered.Assertions())
+			context.SetAssertions([]grammar.Assertion{
+				{ID: leave, Check: assertions[leave]},
+				{ID: enter, Check: assertions[enter]},
+			})
 			input := grammar.AssertionInput{Line: context.Line(), OpenBlock: test.block, CandidateParent: test.parent}
 			if got := context.Assert(test.id, input); got != test.expected {
 				t.Fatalf("Assert(%s) = %t, требуется %t", test.id, got, test.expected)
+			}
+		})
+	}
+}
+
+func TestBuiltinGr12ReturnsIndependentAssertionMaps(t *testing.T) {
+	for _, mode := range []string{"same registry", "separate registries"} {
+		t.Run(mode, func(t *testing.T) {
+			firstRegistry := grammar.NewRegistry()
+			secondRegistry := firstRegistry
+			if mode == "separate registries" {
+				secondRegistry = grammar.NewRegistry()
+			}
+			first := gr12.BuiltinGr12(firstRegistry)
+			second := gr12.BuiltinGr12(secondRegistry)
+			if len(first) != 2 || first[gr12.IncreasesNesting] == nil || first[gr12.DecreasesNesting] == nil {
+				t.Fatal("Повторная регистрация повредила первую карту")
+			}
+			first[gr12.IncreasesNesting] = func(grammar.AssertionInput) bool { return false }
+			delete(first, gr12.DecreasesNesting)
+			first["caller-only"] = func(grammar.AssertionInput) bool { return true }
+			fresh := gr12.BuiltinGr12(firstRegistry)
+			assertRegisteredGr12(t, firstRegistry)
+			assertRegisteredGr12(t, secondRegistry)
+			task := runRegisteredGr12(t, firstRegistry, "@task 1").Line()
+			closing := runRegisteredGr12(t, firstRegistry, "@endtask").Line()
+			for _, test := range []struct {
+				name       string
+				assertions map[grammar.AssertionID]grammar.AssertionFunc
+			}{{"previously returned", second}, {"newly returned", fresh}} {
+				t.Run(test.name, func(t *testing.T) {
+					if len(test.assertions) != 2 || test.assertions[gr12.IncreasesNesting] == nil || test.assertions[gr12.DecreasesNesting] == nil {
+						t.Fatal("Изменение первой карты затронуло другую карту")
+					}
+					context := grammar.NewContext("")
+					context.SetAssertions([]grammar.Assertion{
+						{ID: gr12.IncreasesNesting, Check: test.assertions[gr12.IncreasesNesting]},
+						{ID: gr12.DecreasesNesting, Check: test.assertions[gr12.DecreasesNesting]},
+					})
+					if !context.Assert(gr12.IncreasesNesting, grammar.AssertionInput{Line: task}) ||
+						!context.Assert(gr12.DecreasesNesting, grammar.AssertionInput{Line: closing, CandidateParent: &task}) {
+						t.Fatal("Изменение первой карты подменило функции другой карты")
+					}
+				})
+			}
+			if first[gr12.IncreasesNesting](grammar.AssertionInput{Line: task}) || first[gr12.DecreasesNesting] != nil || first["caller-only"] == nil {
+				t.Fatal("Новая регистрация изменила карту вызывающего кода")
 			}
 		})
 	}
@@ -176,16 +236,9 @@ func assertRegisteredGr12(t *testing.T, registry grammar.Registry) {
 	if registered.DetectionFuncs()[0] == nil || registered.OrchestrationFuncs()[0] == nil || registered.LineTypeFuncs()[0] == nil || registered.LineParserFuncs()[0] == nil {
 		t.Fatal("Зарегистрирована отсутствующая функция")
 	}
-	assertions := registered.Assertions()
-	if len(assertions) != 2 {
-		t.Fatalf("Зарегистрировано %d утверждений вместо двух", len(assertions))
-	}
-	seen := make(map[grammar.AssertionID]bool)
-	for _, assertion := range assertions {
-		if assertion.Check == nil || seen[assertion.ID] || (assertion.ID != gr12.IncreasesNesting && assertion.ID != gr12.DecreasesNesting) {
-			t.Fatalf("Неверное именованное утверждение: %+v", assertion)
-		}
-		seen[assertion.ID] = true
+	enter, leave := registered.Assertions()
+	if enter != gr12.IncreasesNesting || leave != gr12.DecreasesNesting {
+		t.Fatalf("Неверные роли утверждений: вход %q, выход %q", enter, leave)
 	}
 }
 
