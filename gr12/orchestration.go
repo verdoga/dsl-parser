@@ -1,6 +1,9 @@
 package gr12
 
-import "github.com/verdoga/dsl-parser/grammar"
+import (
+	"github.com/verdoga/dsl-parser/grammar"
+	"github.com/verdoga/dsl-parser/model"
+)
 
 // orchestrateLine выбирает функции определения типа и разбора для этой строки.
 // Порядок их вызовов — внутреннее решение грамматики версии 1.2.
@@ -22,9 +25,10 @@ func orchestrateLine(context grammar.GrammarContext) bool {
 		}
 	}
 
-	// Счётчики учитывают и текстовые символы, поэтому сами по себе
-	// не устанавливают тип: положение и форму определяет классификация.
-	if !classifyLine(context) {
+	// Заданный вызывающим кодом текстовый тип сохраняется: содержимое
+	// не классифицируется повторно как DSL. Открытые блоки здесь не нужны.
+	kind := context.Line().LineType
+	if kind != model.LineTypeContent && kind != model.LineTypeBlank && !classifyLine(context) {
 		return false
 	}
 	return parseLine(context)

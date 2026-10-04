@@ -154,27 +154,6 @@ func parseHeading(context grammar.GrammarContext) {
 	checkStrayBrace(context, titleStart+1, end+1)
 }
 
-// parseContent сохраняет непустую строку одним элементом content.
-// Текст не разбивается на ячейки, варианты, плейсхолдеры или HTML.
-// Исключаются только краевые U+0020 и TAB; экранирование сохраняется.
-func parseContent(context grammar.GrammarContext) {
-	if context == nil {
-		return
-	}
-	source := []rune(context.String())
-	start, end := 0, len(source)
-	for start < end && (source[start] == ' ' || source[start] == '\t') {
-		start++
-	}
-	for end > start && (source[end-1] == ' ' || source[end-1] == '\t') {
-		end--
-	}
-	if start < end {
-		value := string(source[start:end])
-		addElement(context, model.ElementTypeContent, start+1, end+1, &value)
-	}
-}
-
 // parseClosing выделяет закрывающую скобку и вызывает проверку её хвоста.
 // Наличие открытого блока эта функция не проверяет.
 // Скобка должна быть первым символом после краевых U+0020 и TAB.

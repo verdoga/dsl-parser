@@ -157,27 +157,24 @@ func TestLineRoutesCallRegisteredFunctionsInOrder(t *testing.T) {
 	var calls []string
 	detect := registered.DetectionFuncs()[0]
 	orchestrate := registered.OrchestrationFuncs()[0]
-	parse := registered.LineParserFuncs()[0]
 	enter, leave := registered.Assertions()
 	p.grammars.Register("1.2", []grammar.DetectionFunc{
 		func(c grammar.GrammarContext) bool { calls = append(calls, "d1"); return detect(c) },
 		func(c grammar.GrammarContext) bool { calls = append(calls, "d2"); return true },
 	}, []grammar.OrchestrationFunc{
-		func(c grammar.GrammarContext) bool { calls = append(calls, "o1"); return orchestrate(c) },
-		func(c grammar.GrammarContext) bool { calls = append(calls, "o2"); return true },
-	}, nil, []grammar.LineParserFunc{
 		func(c grammar.GrammarContext) bool {
-			calls = append(calls, "content")
-			if c.Line().LineType != model.LineTypeContent || c.Line().ParentLine != nil || c.String() != "@unknown" {
-				t.Fatal("В контекст передано состояние блока или неверный тип")
+			calls = append(calls, "o1")
+			if c.Line().Number == 3 && (c.Line().LineType != model.LineTypeContent || c.Line().ParentLine != nil) {
+				t.Fatal("Не сохранён заранее заданный тип содержимого")
 			}
-			return parse(c)
+			return orchestrate(c)
 		},
-	}, enter, leave)
+		func(c grammar.GrammarContext) bool { calls = append(calls, "o2"); return true },
+	}, nil, registered.LineParserFuncs(), enter, leave)
 	if err := p.Parse(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"d1", "d2", "o1", "o2", "d1", "d2", "o1", "o2", "content", "d1", "d2", "o1", "o2", "d1", "d2", "o1", "o2"}
+	want := []string{"d1", "d2", "o1", "o2", "d1", "d2", "o1", "o2", "d1", "d2", "o1", "o2", "d1", "d2", "o1", "o2", "d1", "d2", "o1", "o2"}
 	if !slices.Equal(calls, want) {
 		t.Fatalf("Порядок вызовов: %v", calls)
 	}
@@ -238,27 +235,53 @@ func TestFailedDetectionAndEmptyRemainderProduceP015(t *testing.T) {
 	}
 }
 
-func TestFatalStructuralDiagnosticPreservesRemainingLinesAsContent(t *testing.T) {
-	p := inputParser(t, "@dsl-version 1.2\n@task A\n@task B\n}")
-	registered, _ := p.grammars.Lookup("1.2")
-	enter, leave := registered.Assertions()
-	orchestrate := registered.OrchestrationFuncs()[0]
-	p.grammars.Register("1.2", registered.DetectionFuncs(), []grammar.OrchestrationFunc{func(c grammar.GrammarContext) bool {
-		complete := orchestrate(c)
-		if c.Line().Number == 2 {
-			c.AddDiagnostic(model.Diagnostic{DiagnosticCode: diagnostics.P011, Location: &model.Location{Start: model.Position{Line: 2, Column: 1}, End: model.Position{Line: 2, Column: 6}}})
-		}
-		return complete
-	}}, nil, registered.LineParserFuncs(), enter, leave)
+func TestMalformedClosingResetsStacksAndContinuesParsing(t *testing.T) {
+	p := inputParser(t, "@dsl-version 1.2\n@variants {\n@task A\n@note {\n} }\n@task B\nText\n@endtask\n}")
 	if err := p.Parse(); err != nil {
 		t.Fatal(err)
 	}
-	if len(p.result.Lines) != 4 || len(p.result.Diagnostics) != 1 || !p.result.Diagnostics[0].Fatal {
-		t.Fatal("Фатальная структурная диагностика потеряла оставшиеся строки")
+	if len(p.result.Lines) != 9 {
+		t.Fatal("Потеряны строки")
 	}
-	for _, line := range p.result.Lines[2:] {
-		if line.LineType != model.LineTypeContent || line.ParentLine != nil || line.NestingLevel != 0 {
-			t.Fatal("После фатальной ошибки восстановлены ненадёжные связи")
+	for _, diagnostic := range p.result.Diagnostics {
+		if diagnostic.Fatal {
+			t.Fatalf("Локальная ошибка стала фатальной: %+v", diagnostic)
 		}
+	}
+	if len(p.result.Diagnostics) != 2 || p.result.Diagnostics[0].DiagnosticCode != diagnostics.P010 || p.result.Diagnostics[1].DiagnosticCode != diagnostics.P009 {
+		t.Fatalf("Диагностики: %+v", p.result.Diagnostics)
+	}
+	for _, i := range []int{4, 5, 7, 8} {
+		if p.result.Lines[i].ParentLine != nil || p.result.Lines[i].NestingLevel != 0 {
+			t.Fatalf("Строка %d не корневая", i+1)
+		}
+	}
+	next := p.result.Lines[6]
+	if next.ParentLine == nil || *next.ParentLine != 6 || next.NestingLevel != 1 {
+		t.Fatal("После сброса не создано новое задание")
+	}
+	if p.result.Lines[2].ParentLine == nil || *p.result.Lines[2].ParentLine != 2 {
+		t.Fatal("Переписаны прежние связи")
+	}
+}
+
+func TestRepeatedClosingDiagnosticStillResetsStacks(t *testing.T) {
+	p := inputParser(t, "@dsl-version 1.2\n@variants {\n} }\n@task New\nText")
+	p.result.Diagnostics = append(p.result.Diagnostics, model.Diagnostic{
+		ID: "existing", Source: p.processingID, DiagnosticCode: diagnostics.P010,
+		SeverityLevel: diagnostics.SeverityError, DiagnosticScope: diagnostics.ScopeLine,
+		Location: &model.Location{Start: model.Position{Line: 3, Column: 1}, End: model.Position{Line: 3, Column: 4}},
+	})
+	if err := p.Parse(); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.result.Diagnostics) != 1 || p.result.Diagnostics[0].ID != "existing" {
+		t.Fatalf("Повтор диагностики: %+v", p.result.Diagnostics)
+	}
+	if p.result.Lines[2].ParentLine != nil || p.result.Lines[3].ParentLine != nil {
+		t.Fatal("Повторная P010 не сбросила стеки")
+	}
+	if parent := p.result.Lines[4].ParentLine; parent == nil || *parent != 4 {
+		t.Fatal("После сброса не создан новый родитель")
 	}
 }

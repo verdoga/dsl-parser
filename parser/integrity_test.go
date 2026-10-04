@@ -40,8 +40,8 @@ func TestValidateResultAcceptsValidModelsWithoutMutation(t *testing.T) {
 			r.Lines[1].HasErrors = true
 			r.Diagnostics = append(r.Diagnostics, model.Diagnostic{
 				ID: "open", Source: "run-b", DiagnosticCode: diagnostics.P011, SeverityLevel: diagnostics.SeverityError,
-				DiagnosticScope: diagnostics.ScopeBlock, Fatal: true,
-				Location: &model.Location{Start: model.Position{Line: 2, Column: 7}, End: model.Position{Line: 3, Column: 3}},
+				DiagnosticScope: diagnostics.ScopeBlock,
+				Location:        &model.Location{Start: model.Position{Line: 2, Column: 7}, End: model.Position{Line: 3, Column: 3}},
 			})
 		}},
 	} {
@@ -193,16 +193,16 @@ func TestCheckParentLinksRequiresMatchingOpenBlock(t *testing.T) {
 		{Number: 3, LineType: model.LineTypeBlockEnd, ParentLine: &second, NestingLevel: 2},
 		{Number: 4, LineType: model.LineTypeBlockEnd, ParentLine: &first, NestingLevel: 1},
 	}
-	if err := checkParentLinks(lines); err != nil {
+	if err := checkParentLinks(lines, nil); err != nil {
 		t.Fatal(err)
 	}
 	lines[2].ParentLine, lines[2].NestingLevel = &first, 1
-	if err := checkParentLinks(lines); err == nil {
+	if err := checkParentLinks(lines, nil); err == nil {
 		t.Fatal("Принято закрытие внешнего блока раньше внутреннего")
 	}
 	lines[2].ParentLine, lines[2].NestingLevel = &second, 2
 	lines[3].ParentLine, lines[3].NestingLevel = &second, 2
-	if err := checkParentLinks(lines); err == nil {
+	if err := checkParentLinks(lines, nil); err == nil {
 		t.Fatal("Принято повторное закрытие уже закрытого блока")
 	}
 }

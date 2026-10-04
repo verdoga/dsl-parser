@@ -14,7 +14,7 @@ import (
 // конкретные Message, Location и RelatedLocations. При пустом Message берёт
 // текст реестра. Для отдельной { сохраняет переданную грамматикой область
 // element у P008; исходную строку проверяет importLineDiagnostics.
-// IO001, P001, P002, P011, P013 и P014 фатальны; P003–P010, P012 и P015 — нет.
+// Фатальность берётся только из реестра; значение из грамматики не используется.
 func (p *Parser) completeDiagnostic(occurrence model.Diagnostic) (model.Diagnostic, error) {
 	if p.diagnostics == nil {
 		return model.Diagnostic{}, fmt.Errorf("не задан реестр диагностик")
@@ -30,13 +30,6 @@ func (p *Parser) completeDiagnostic(occurrence model.Diagnostic) (model.Diagnost
 	occurrence.SeverityLevel = description.Severity()
 	occurrence.DiagnosticScope = scope
 	occurrence.Fatal = description.IsFatal()
-	switch occurrence.DiagnosticCode {
-	case diagnostics.IO001, diagnostics.P001, diagnostics.P002, diagnostics.P011, diagnostics.P013, diagnostics.P014:
-		occurrence.Fatal = true
-	case diagnostics.P003, diagnostics.P004, diagnostics.P005, diagnostics.P006, diagnostics.P007,
-		diagnostics.P008, diagnostics.P009, diagnostics.P010, diagnostics.P012, diagnostics.P015:
-		occurrence.Fatal = false
-	}
 	if occurrence.Message == "" {
 		occurrence.Message = description.Message()
 	}

@@ -189,11 +189,12 @@ func TestParseCompletesOnceForSuccessAndInputDiagnostics(t *testing.T) {
 			} else if result.Document.LineCount == nil || *result.Document.LineCount != test.lineCount {
 				t.Fatal("LineCount не соответствует сохранённым строкам")
 			}
+			description, _ := diagnostics.NewRegistry().Lookup(test.code)
 			if test.code == "" {
 				if len(result.Diagnostics) != 0 || result.Document.HasErrors || result.Lines[0].Raw != "@dsl-version 1.2" || result.Lines[0].LineEnding != model.LineEndingCRLF {
 					t.Fatal("Успешный документ изменён или получил лишнюю диагностику")
 				}
-			} else if len(result.Diagnostics) != 1 || result.Diagnostics[0].DiagnosticCode != test.code || result.Diagnostics[0].Source != "current" || result.Diagnostics[0].ID == "" || !result.Diagnostics[0].Fatal || !result.Document.HasErrors {
+			} else if len(result.Diagnostics) != 1 || result.Diagnostics[0].DiagnosticCode != test.code || result.Diagnostics[0].Source != "current" || result.Diagnostics[0].ID == "" || result.Diagnostics[0].Fatal != description.IsFatal() || !result.Document.HasErrors {
 				t.Fatalf("Не сохранена ожидаемая диагностика %s: %+v", test.code, result.Diagnostics)
 			}
 			before, reads := parserSnapshot(t, result), reader.reads

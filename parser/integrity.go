@@ -15,7 +15,7 @@ func validateResult(result *model.Result) error {
 	if err := checkLineSequence(result); err != nil {
 		return err
 	}
-	if err := checkParentLinks(result.Lines); err != nil {
+	if err := checkParentLinks(result.Lines, result.Diagnostics); err != nil {
 		return err
 	}
 	if err := checkDiagnosticSources(result); err != nil {
@@ -78,7 +78,14 @@ func checkLineSequence(result *model.Result) error {
 
 // checkParentLinks проверяет существование предшествующих родителей, глубину,
 // корневые заголовки и связь закрывающей строки с открывающей.
-func checkParentLinks(lines []model.Line) error {
+// Корневая строка с P010 обозначает сброс стеков после неправильного закрытия.
+func checkParentLinks(lines []model.Line, occurrences []model.Diagnostic) error {
+	resets := make(map[int]bool)
+	for _, diagnostic := range occurrences {
+		if diagnostic.DiagnosticCode == diagnostics.P010 && diagnostic.SeverityLevel == diagnostics.SeverityError && diagnostic.DiagnosticScope == diagnostics.ScopeLine && diagnostic.Location != nil {
+			resets[diagnostic.Location.Start.Line] = true
+		}
+	}
 	preceding := make(map[int]model.Line, len(lines))
 	var openBlocks []int
 	for _, line := range lines {
@@ -97,6 +104,9 @@ func checkParentLinks(lines []model.Line) error {
 			if line.LineType == model.LineTypeHeading {
 				return fmt.Errorf("строка %d: заголовок имеет родителя", line.Number)
 			}
+		}
+		if line.LineType == model.LineTypeBlockEnd && line.ParentLine == nil && resets[line.Number] {
+			openBlocks = nil
 		}
 		switch line.LineType {
 		case model.LineTypeBlockStart:

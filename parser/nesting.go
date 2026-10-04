@@ -158,7 +158,7 @@ func (p *Parser) resetNesting(line *model.Line) {
 	}
 }
 
-// checkOpenBlocks на EOF выдаёт фатальную P011 для каждого незакрытого блока.
+// checkOpenBlocks на EOF выдаёт P011 для каждого незакрытого блока.
 // Сообщение содержит готовое имя тега и номер открытия, Location — диапазон
 // открывающей скобки. Сохранённые строки и стеки не меняются.
 func (p *Parser) checkOpenBlocks() error {
