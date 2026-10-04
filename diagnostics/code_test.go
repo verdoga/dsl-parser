@@ -22,6 +22,7 @@ func TestCodesHaveStableUniqueValues(t *testing.T) {
 		{name: "P012", code: P012, want: "P012"},
 		{name: "P013", code: P013, want: "P013"},
 		{name: "P014", code: P014, want: "P014"},
+		{name: "P015", code: P015, want: "P015"},
 		{name: "IO001", code: IO001, want: "IO001"},
 	}
 

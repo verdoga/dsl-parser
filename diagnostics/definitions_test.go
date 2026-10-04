@@ -67,6 +67,10 @@ func TestBuiltinDiagnosticsProvidesCompleteDescriptions(t *testing.T) {
 			scope: ScopeDocument, fatal: true, hasCheck: true,
 		},
 		{
+			code: P015, message: "Незавершённый разбор строки",
+			scope: ScopeElement, fatal: false, hasCheck: false,
+		},
+		{
 			code: IO001, message: "Техническая ошибка чтения входного файла",
 			scope: ScopeDocument, fatal: true, hasCheck: true,
 		},

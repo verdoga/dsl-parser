@@ -16,7 +16,7 @@ func TestRegistryFindsOnlyExactRegisteredVersions(t *testing.T) {
 	}
 	versions := []string{"", "1.2", " 1.2 ", "DSL-next", "dsl-next"}
 	for _, version := range versions {
-		r.Register(version, nil, nil, nil, nil, []grammar.Assertion{{ID: grammar.AssertionID(version)}})
+		r.Register(version, nil, nil, nil, nil, grammar.AssertionID(version), grammar.AssertionID("leave:"+version))
 	}
 	for _, version := range versions {
 		t.Run(version, func(t *testing.T) {
@@ -24,9 +24,9 @@ func TestRegistryFindsOnlyExactRegisteredVersions(t *testing.T) {
 			if !found || g.Version() != version {
 				t.Fatalf("Lookup(%q): версия = %q, found = %t", version, g.Version(), found)
 			}
-			assertions := g.Assertions()
-			if len(assertions) != 1 || string(assertions[0].ID) != version {
-				t.Fatalf("Для версии %q получен чужой набор: %+v", version, assertions)
+			enter, leave := g.Assertions()
+			if string(enter) != version || string(leave) != "leave:"+version {
+				t.Fatalf("Для версии %q получены чужие роли: (%q, %q)", version, enter, leave)
 			}
 			if len(g.DetectionFuncs()) != 0 || len(g.OrchestrationFuncs()) != 0 ||
 				len(g.LineTypeFuncs()) != 0 || len(g.LineParserFuncs()) != 0 {
@@ -44,25 +44,42 @@ func TestRegistryFindsOnlyExactRegisteredVersions(t *testing.T) {
 	}
 }
 
+func TestRegistryPreservesExactRoleIDs(t *testing.T) {
+	tests := []struct {
+		name          string
+		enterParentID grammar.AssertionID
+		leaveParentID grammar.AssertionID
+	}{
+		{name: "empty roles"},
+		{name: "empty enter", leaveParentID: "leave"},
+		{name: "empty leave", enterParentID: "enter"},
+		{name: "same IDs", enterParentID: "same", leaveParentID: "same"},
+		{name: "exact spelling", enterParentID: " Enter ", leaveParentID: "LEAVE"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r := grammar.NewRegistry()
+			r.Register("1.2", nil, nil, nil, nil, test.enterParentID, test.leaveParentID)
+			g, found := r.Lookup("1.2")
+			if !found {
+				t.Fatal("Lookup не нашёл зарегистрированную версию")
+			}
+			enter, leave := g.Assertions()
+			if enter != test.enterParentID || leave != test.leaveParentID {
+				t.Fatalf("Assertions() = (%q, %q), требуется (%q, %q)", enter, leave, test.enterParentID, test.leaveParentID)
+			}
+		})
+	}
+}
+
 func TestRegistryCopiesAllInputSlicesWithoutCallingFunctions(t *testing.T) {
 	var calls []string
 	detection := registryTestActions[grammar.DetectionFunc]("detection", &calls)
 	orchestration := registryTestActions[grammar.OrchestrationFunc]("orchestration", &calls)
 	lineType := registryTestActions[grammar.LineTypeFunc]("line type", &calls)
 	lineParser := registryTestActions[grammar.LineParserFunc]("line parser", &calls)
-	assertions := []grammar.Assertion{
-		{ID: "duplicate", Check: func(grammar.AssertionInput) bool {
-			calls = append(calls, "assertion first")
-			return true
-		}},
-		{ID: "missing"},
-		{ID: "duplicate", Check: func(grammar.AssertionInput) bool {
-			calls = append(calls, "assertion second")
-			return false
-		}},
-	}
 	r := grammar.NewRegistry()
-	r.Register("1.2", detection, orchestration, lineType, lineParser, assertions)
+	r.Register("1.2", detection, orchestration, lineType, lineParser, "z-enter", "a-leave")
 	if len(calls) != 0 {
 		t.Fatal("Register вызвал функции")
 	}
@@ -70,14 +87,14 @@ func TestRegistryCopiesAllInputSlicesWithoutCallingFunctions(t *testing.T) {
 	clear(orchestration)
 	clear(lineType)
 	clear(lineParser)
-	clear(assertions)
 	for attempt := 0; attempt < 2; attempt++ {
 		calls = nil
 		g, found := r.Lookup("1.2")
 		if !found || len(calls) != 0 {
 			t.Fatal("Lookup не нашёл версию или вызвал функции")
 		}
-		d, o, lt, lp, a := g.DetectionFuncs(), g.OrchestrationFuncs(), g.LineTypeFuncs(), g.LineParserFuncs(), g.Assertions()
+		d, o, lt, lp := g.DetectionFuncs(), g.OrchestrationFuncs(), g.LineTypeFuncs(), g.LineParserFuncs()
+		enter, leave := g.Assertions()
 		if len(calls) != 0 {
 			t.Fatal("Получение наборов вызвало функции")
 		}
@@ -85,24 +102,18 @@ func TestRegistryCopiesAllInputSlicesWithoutCallingFunctions(t *testing.T) {
 		assertRegistryActions(t, o)
 		assertRegistryActions(t, lt)
 		assertRegistryActions(t, lp)
-		if len(a) != 3 || a[0].ID != "duplicate" || a[1].ID != "missing" || a[2].ID != "duplicate" ||
-			a[0].Check == nil || a[1].Check != nil || a[2].Check == nil {
-			t.Fatalf("Утверждения не сохранили порядок, повторы или функции: %+v", a)
-		}
-		if !a[0].Check(grammar.AssertionInput{}) || a[2].Check(grammar.AssertionInput{}) {
-			t.Fatal("Зарегистрированные проверки вернули неверные ответы")
+		if enter != "z-enter" || leave != "a-leave" {
+			t.Fatalf("Изменены ID структурных ролей: (%q, %q)", enter, leave)
 		}
 		wantCalls := []string{
 			"detection first", "detection second", "detection first",
 			"orchestration first", "orchestration second", "orchestration first",
 			"line type first", "line type second", "line type first",
 			"line parser first", "line parser second", "line parser first",
-			"assertion first", "assertion second",
 		}
 		if !slices.Equal(calls, wantCalls) {
 			t.Fatalf("Порядок вызовов = %v, требуется %v", calls, wantCalls)
 		}
-		clear(a)
 	}
 }
 
@@ -134,27 +145,26 @@ func TestRegistryReplacesWholeCollectionAndPreservesOtherVersions(t *testing.T) 
 		t.Run(mode, func(t *testing.T) {
 			r := grammar.NewRegistry()
 			oldAction := func(grammar.GrammarContext) bool { return false }
-			oldAssertion := grammar.Assertion{ID: "old", Check: func(grammar.AssertionInput) bool { return false }}
 			for _, version := range []string{"1.2", "other"} {
 				r.Register(version, []grammar.DetectionFunc{oldAction}, []grammar.OrchestrationFunc{oldAction},
-					[]grammar.LineTypeFunc{oldAction}, []grammar.LineParserFunc{oldAction}, []grammar.Assertion{oldAssertion})
+					[]grammar.LineTypeFunc{oldAction}, []grammar.LineParserFunc{oldAction}, "old-enter", "old-leave")
 			}
 			var detection []grammar.DetectionFunc
 			var orchestration []grammar.OrchestrationFunc
 			var lineType []grammar.LineTypeFunc
 			var lineParser []grammar.LineParserFunc
-			var assertions []grammar.Assertion
+			var enterParentID, leaveParentID grammar.AssertionID
 			switch mode {
 			case "populated":
 				action := func(grammar.GrammarContext) bool { return true }
 				detection, orchestration = []grammar.DetectionFunc{action}, []grammar.OrchestrationFunc{action}
 				lineType, lineParser = []grammar.LineTypeFunc{action}, []grammar.LineParserFunc{action}
-				assertions = []grammar.Assertion{{ID: "new", Check: func(grammar.AssertionInput) bool { return true }}}
+				enterParentID, leaveParentID = "new-enter", "new-leave"
 			case "empty slices":
 				detection, orchestration = []grammar.DetectionFunc{}, []grammar.OrchestrationFunc{}
-				lineType, lineParser, assertions = []grammar.LineTypeFunc{}, []grammar.LineParserFunc{}, []grammar.Assertion{}
+				lineType, lineParser = []grammar.LineTypeFunc{}, []grammar.LineParserFunc{}
 			}
-			r.Register("1.2", detection, orchestration, lineType, lineParser, assertions)
+			r.Register("1.2", detection, orchestration, lineType, lineParser, enterParentID, leaveParentID)
 			g, found := r.Lookup("1.2")
 			if !found || g.Version() != "1.2" {
 				t.Fatal("Повторная регистрация потеряла версию")
@@ -163,15 +173,19 @@ func TestRegistryReplacesWholeCollectionAndPreservesOtherVersions(t *testing.T) 
 			if mode == "populated" {
 				wantLength = 1
 			}
-			d, o, lt, lp, a := g.DetectionFuncs(), g.OrchestrationFuncs(), g.LineTypeFuncs(), g.LineParserFuncs(), g.Assertions()
-			if len(d) != wantLength || len(o) != wantLength || len(lt) != wantLength || len(lp) != wantLength || len(a) != wantLength {
-				t.Fatal("Повторная регистрация не заменила все пять наборов полностью")
+			d, o, lt, lp := g.DetectionFuncs(), g.OrchestrationFuncs(), g.LineTypeFuncs(), g.LineParserFuncs()
+			enter, leave := g.Assertions()
+			if len(d) != wantLength || len(o) != wantLength || len(lt) != wantLength || len(lp) != wantLength {
+				t.Fatal("Повторная регистрация не заменила все четыре набора полностью")
+			}
+			if enter != enterParentID || leave != leaveParentID {
+				t.Fatalf("Повторная регистрация не заменила роли: (%q, %q), требуется (%q, %q)", enter, leave, enterParentID, leaveParentID)
 			}
 			if wantLength == 1 {
-				if d[0] == nil || o[0] == nil || lt[0] == nil || lp[0] == nil || a[0].Check == nil || a[0].ID != "new" {
-					t.Fatal("Новые функции или утверждение потеряны")
+				if d[0] == nil || o[0] == nil || lt[0] == nil || lp[0] == nil {
+					t.Fatal("Новые функции потеряны")
 				}
-				if !d[0](nil) || !o[0](nil) || !lt[0](nil) || !lp[0](nil) || !a[0].Check(grammar.AssertionInput{}) {
+				if !d[0](nil) || !o[0](nil) || !lt[0](nil) || !lp[0](nil) {
 					t.Fatal("После замены выполняются прежние функции")
 				}
 			}
@@ -179,14 +193,18 @@ func TestRegistryReplacesWholeCollectionAndPreservesOtherVersions(t *testing.T) 
 			if !found || other.Version() != "other" {
 				t.Fatal("Замена затронула другую версию")
 			}
-			d, o, lt, lp, a = other.DetectionFuncs(), other.OrchestrationFuncs(), other.LineTypeFuncs(), other.LineParserFuncs(), other.Assertions()
-			if len(d) != 1 || len(o) != 1 || len(lt) != 1 || len(lp) != 1 || len(a) != 1 {
+			d, o, lt, lp = other.DetectionFuncs(), other.OrchestrationFuncs(), other.LineTypeFuncs(), other.LineParserFuncs()
+			enter, leave = other.Assertions()
+			if len(d) != 1 || len(o) != 1 || len(lt) != 1 || len(lp) != 1 {
 				t.Fatal("Изменились наборы другой версии")
 			}
-			if d[0] == nil || o[0] == nil || lt[0] == nil || lp[0] == nil || a[0].Check == nil || a[0].ID != "old" {
+			if d[0] == nil || o[0] == nil || lt[0] == nil || lp[0] == nil {
 				t.Fatal("Изменились функции другой версии")
 			}
-			if d[0](nil) || o[0](nil) || lt[0](nil) || lp[0](nil) || a[0].Check(grammar.AssertionInput{}) {
+			if enter != "old-enter" || leave != "old-leave" {
+				t.Fatalf("Изменились роли другой версии: (%q, %q)", enter, leave)
+			}
+			if d[0](nil) || o[0](nil) || lt[0](nil) || lp[0](nil) {
 				t.Fatal("Для другой версии выполняются новые функции")
 			}
 		})

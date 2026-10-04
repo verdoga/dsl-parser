@@ -35,7 +35,8 @@ type LineParserFunc func(context GrammarContext) bool
 type AssertionID string
 
 // AssertionInput содержит типизированные данные для проверки утверждения.
-// Line — проверяемая строка до назначения ей логического родителя.
+// Line — проверяемая строка: при предварительном выборе родителя связи ещё
+// не назначены, при окончательном обновлении состояния передаётся готовая строка.
 // OpenBlock и CandidateParent могут отсутствовать; значение каждого поля
 // определяется состоянием парсера на момент вызова.
 type AssertionInput struct {
@@ -56,7 +57,8 @@ type Assertion struct {
 }
 
 // grammarCollection хранит версию DSL и упорядоченные наборы функций
-// четырёх этапов её грамматики, а также именованные утверждения.
+// четырёх этапов её грамматики, а также ID двух структурных утверждений.
+// Функции утверждений в наборе грамматики не хранятся.
 type grammarCollection struct {
 	// version — версия DSL, для которой зарегистрирован набор функций.
 	version string
@@ -73,8 +75,11 @@ type grammarCollection struct {
 	// lineParserFuncs — функции этапа разбора строки в порядке их вызова.
 	lineParserFuncs []LineParserFunc
 
-	// assertions — именованные проверки грамматики.
-	assertions []Assertion
+	// enterParentID — ID утверждения об открытии логического родителя.
+	enterParentID AssertionID
+
+	// leaveParentID — ID утверждения о завершении логического родителя.
+	leaveParentID AssertionID
 }
 
 // Version возвращает версию DSL, которой соответствует набор функций.
@@ -106,8 +111,9 @@ func (g grammarCollection) LineParserFuncs() []LineParserFunc {
 	return slices.Clone(g.lineParserFuncs)
 }
 
-// Assertions возвращает зарегистрированные именованные проверки.
-// Возвращаемый срез не разделяет хранилище с набором грамматики.
-func (g grammarCollection) Assertions() []Assertion {
-	return slices.Clone(g.assertions)
+// Assertions возвращает ID утверждений об открытии и завершении логического
+// родителя в этом порядке. Значения возвращаются без изменения, включая пустые;
+// функции проверок предоставляет вызывающий код отдельно от реестра.
+func (g grammarCollection) Assertions() (enterParentID, leaveParentID AssertionID) {
+	return g.enterParentID, g.leaveParentID
 }

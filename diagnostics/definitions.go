@@ -1,6 +1,6 @@
 package diagnostics
 
-// builtinDiagnostics возвращает полный набор встроенных описаний P001–P014 и IO001
+// builtinDiagnostics возвращает полный набор встроенных описаний P001–P015 и IO001
 // для регистрации конструктором NewRegistry.
 func builtinDiagnostics() []diagnostic {
 	return []diagnostic{
@@ -95,6 +95,12 @@ func builtinDiagnostics() []diagnostic {
 			scope:    ScopeDocument,
 			fatal:    true,
 			check:    checkP014,
+		},
+		{
+			code:     P015,
+			severity: SeverityError,
+			message:  "Незавершённый разбор строки",
+			scope:    ScopeElement,
 		},
 		{
 			code:     IO001,
