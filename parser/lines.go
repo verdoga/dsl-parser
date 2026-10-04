@@ -13,14 +13,10 @@ import (
 
 // parseLines обходит строки по порядку, назначает связи и метаданные,
 // переносит диагностики и сохраняет строку перед обновлением стеков.
-// После фатальной структурной диагностики оставшиеся строки сохраняет
-// в корневом лексическом режиме без восстановления ненадёжных связей.
+// При неправильном закрытии сбрасывает стеки. Следующая строка проходит
+// обычный разбор от корня; локальные диагностики его не останавливают.
 func (p *Parser) parseLines(lines []model.Line) error {
-	safe := false
 	for _, source := range lines {
-		if safe {
-			source.LineType = model.LineTypeContent
-		}
 		context, err := p.parseLine(source)
 		if err != nil {
 			return err
@@ -35,20 +31,20 @@ func (p *Parser) parseLines(lines []model.Line) error {
 		if err := checkElementPositions(line); err != nil {
 			return err
 		}
-		firstDiagnostic := len(p.result.Diagnostics)
 		if err := p.importLineDiagnostics(context, &line); err != nil {
 			return err
 		}
-		for _, diagnostic := range p.result.Diagnostics[firstDiagnostic:] {
-			if diagnostic.Fatal && (diagnostic.DiagnosticScope == diagnostics.ScopeBlock || diagnostic.DiagnosticScope == diagnostics.ScopeLine) {
-				safe = true
+		reset := false
+		for _, diagnostic := range context.Diagnostics() {
+			if line.LineType == model.LineTypeBlockEnd && diagnostic.DiagnosticCode == diagnostics.P010 {
+				reset = true
 				p.resetNesting(&line)
 			}
 		}
 		if err := p.appendLine(source, line); err != nil {
 			return err
 		}
-		if !safe {
+		if !reset {
 			if err := p.updateParents(context, p.result.Lines[len(p.result.Lines)-1]); err != nil {
 				return err
 			}
@@ -58,8 +54,8 @@ func (p *Parser) parseLines(lines []model.Line) error {
 }
 
 // parseLine создаёт контекст одной строки с диагностическим реестром и
-// утверждениями выбранной версии. Обычный маршрут вызывает детекцию и
-// оркестрацию; текстовый — зарегистрированный разбор заданного типа.
+// утверждениями выбранной версии. Все строки проходят детекцию и оркестрацию.
+// Для содержимого парсер заранее устанавливает content или blank через SetLine.
 // Состояние блоков остаётся в PARSER. Незавершённые фрагменты получают P015.
 func (p *Parser) parseLine(source model.Line) (grammar.GrammarContext, error) {
 	context := grammar.NewContext(source.Raw)
@@ -89,49 +85,34 @@ func (p *Parser) parseLine(source model.Line) (grammar.GrammarContext, error) {
 			textMode = false
 		}
 	}
-	complete := true
 	if textMode {
-		selected, found := p.grammars.Lookup(p.version)
-		if !found || len(selected.LineParserFuncs()) == 0 {
-			return nil, fmt.Errorf("версия %q: не задан построчный разбор содержимого", p.version)
-		}
-		line := source
-		line.LineType = model.LineTypeContent
+		source.LineType = model.LineTypeContent
 		if strings.Trim(source.Raw, " \t") == "" {
-			line.LineType = model.LineTypeBlank
+			source.LineType = model.LineTypeBlank
 		}
-		context.SetLine(line)
-		for _, parse := range selected.LineParserFuncs() {
-			if parse == nil {
-				return nil, fmt.Errorf("версия %q: пустая функция разбора содержимого", p.version)
+		context.SetLine(source)
+	}
+	if len(p.orchestrators) == 0 {
+		return nil, fmt.Errorf("версия %q: не задана оркестрация", p.version)
+	}
+	complete := true
+	for _, detect := range p.detections {
+		if detect == nil {
+			return nil, fmt.Errorf("версия %q: пустая функция детекции", p.version)
+		}
+		if !detect(context) {
+			complete = false
+			break
+		}
+	}
+	if complete {
+		for _, orchestrate := range p.orchestrators {
+			if orchestrate == nil {
+				return nil, fmt.Errorf("версия %q: пустая функция оркестрации", p.version)
 			}
-			if !parse(context) {
+			if !orchestrate(context) {
 				complete = false
 				break
-			}
-		}
-	} else {
-		if len(p.orchestrators) == 0 {
-			return nil, fmt.Errorf("версия %q: не задана оркестрация", p.version)
-		}
-		for _, detect := range p.detections {
-			if detect == nil {
-				return nil, fmt.Errorf("версия %q: пустая функция детекции", p.version)
-			}
-			if !detect(context) {
-				complete = false
-				break
-			}
-		}
-		if complete {
-			for _, orchestrate := range p.orchestrators {
-				if orchestrate == nil {
-					return nil, fmt.Errorf("версия %q: пустая функция оркестрации", p.version)
-				}
-				if !orchestrate(context) {
-					complete = false
-					break
-				}
 			}
 		}
 	}

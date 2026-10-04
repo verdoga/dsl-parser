@@ -22,7 +22,7 @@ func TestCompleteDiagnosticNormsAndConcreteDetails(t *testing.T) {
 		{diagnostics.P005, diagnostics.ScopeLine, false}, {diagnostics.P006, diagnostics.ScopeLine, false},
 		{diagnostics.P007, diagnostics.ScopeLine, false}, {diagnostics.P008, diagnostics.ScopeLine, false},
 		{diagnostics.P009, diagnostics.ScopeLine, false}, {diagnostics.P010, diagnostics.ScopeLine, false},
-		{diagnostics.P011, diagnostics.ScopeBlock, true}, {diagnostics.P012, diagnostics.ScopeElement, false},
+		{diagnostics.P011, diagnostics.ScopeBlock, false}, {diagnostics.P012, diagnostics.ScopeElement, false},
 		{diagnostics.P013, diagnostics.ScopeDocument, true}, {diagnostics.P014, diagnostics.ScopeDocument, true},
 		{diagnostics.P015, diagnostics.ScopeElement, false},
 	} {

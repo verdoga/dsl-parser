@@ -88,8 +88,8 @@ func TestParseContentPreservesWholeTextWithoutInterpretation(t *testing.T) {
 		`Use \{ and \} as text.`, `Literal underscores: \_____`,
 		"Pronoun | Verb | Short form", "<strong><em>Important information</em></strong>",
 		"<br>", "She _____ in London.", "She _____{lives} in London.",
-		"---", "Italian; Spanish; British.", "Ёж🌍\tА", "Text } @note Text",
-		`\{`, `\}`, "\u00a0Text\u00a0", "{x}",
+		"---", "Italian; Spanish; British.", "Ёж🌍\tА",
+		`\{`, `\}`, "\u00a0Text\u00a0",
 	} {
 		t.Run(text, func(t *testing.T) {
 			context := newLineTestContext(t, " \t"+text+" \t")

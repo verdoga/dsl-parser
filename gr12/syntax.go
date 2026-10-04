@@ -150,6 +150,13 @@ func checkClosingTail(context grammar.GrammarContext, braceColumn int) {
 // Диапазон соответствует проверяемому элементу, endColumn не включается.
 // Для одного фрагмента добавляется одна диагностика с его полным диапазоном.
 func checkStrayBrace(context grammar.GrammarContext, startColumn int, endColumn int) {
+	checkTextBraces(context, startColumn, endColumn, false)
+}
+
+// checkTextBraces проверяет скобки одного готового текстового элемента.
+// При allowAnswers парные скобки синтаксической формы _____{ANSWER} допустимы;
+// допустимость её размещения проверяется валидатором, а не построчной грамматикой.
+func checkTextBraces(context grammar.GrammarContext, startColumn, endColumn int, allowAnswers bool) {
 	if context == nil {
 		return
 	}
@@ -157,24 +164,12 @@ func checkStrayBrace(context grammar.GrammarContext, startColumn int, endColumn 
 	if startColumn < 1 || endColumn < startColumn || endColumn > len(source)+1 {
 		return
 	}
-	escaped := false
-	for i := startColumn - 2; i >= 0 && source[i] == '\\'; i-- {
-		escaped = !escaped
-	}
-	for _, symbol := range source[startColumn-1 : endColumn-1] {
-		if symbol == '\\' {
-			escaped = !escaped
-			continue
-		}
-		if !escaped && (symbol == '{' || symbol == '}') {
-			line := context.Line().Number
-			addSyntaxDiagnostic(context, diagnostics.P012, model.Location{
-				Start: model.Position{Line: line, Column: startColumn},
-				End:   model.Position{Line: line, Column: endColumn},
-			})
-			return
-		}
-		escaped = false
+	if hasStrayBrace(source, startColumn-1, endColumn-1, allowAnswers) {
+		line := context.Line().Number
+		addSyntaxDiagnostic(context, diagnostics.P012, model.Location{
+			Start: model.Position{Line: line, Column: startColumn},
+			End:   model.Position{Line: line, Column: endColumn},
+		})
 	}
 }
 

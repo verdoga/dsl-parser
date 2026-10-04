@@ -38,7 +38,7 @@ func TestNestingParentsAndBlockDepth(t *testing.T) {
 					t.Fatalf("Строка %d: родитель %d, глубина %d", line.Number, parent, line.NestingLevel)
 				}
 			}
-			if err := checkParentLinks(p.result.Lines); err != nil {
+			if err := checkParentLinks(p.result.Lines, p.result.Diagnostics); err != nil {
 				t.Fatal(err)
 			}
 			for _, diagnostic := range p.result.Diagnostics {
@@ -120,7 +120,7 @@ func TestUnclosedBlocksReportOpeningAndKeepLines(t *testing.T) {
 		diagnostic := p.result.Diagnostics[i]
 		opening := p.result.Lines[i]
 		brace := opening.Elements[len(opening.Elements)-1]
-		if diagnostic.DiagnosticCode != diagnostics.P011 || !diagnostic.Fatal || diagnostic.SeverityLevel != diagnostics.SeverityError || diagnostic.DiagnosticScope != diagnostics.ScopeBlock || diagnostic.Source != "current" || !strings.Contains(diagnostic.Message, tag) {
+		if diagnostic.DiagnosticCode != diagnostics.P011 || diagnostic.Fatal || diagnostic.SeverityLevel != diagnostics.SeverityError || diagnostic.DiagnosticScope != diagnostics.ScopeBlock || diagnostic.Source != "current" || !strings.Contains(diagnostic.Message, tag) {
 			t.Fatalf("Неверная P011: %+v", diagnostic)
 		}
 		want := model.Location{Start: model.Position{Line: opening.Number, Column: brace.Start}, End: model.Position{Line: opening.Number, Column: brace.End}}
