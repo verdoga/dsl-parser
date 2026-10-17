@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"slices"
 
 	"github.com/verdoga/dsl-parser/diagnostics"
 	"github.com/verdoga/dsl-parser/grammar"
@@ -24,6 +25,9 @@ type Parser struct {
 	grammars grammar.Registry
 	// diagnostics — нормативные описания диагностик.
 	diagnostics diagnostics.Registry
+	// diagnosticRules — собственный набор правил принятия диагностик грамматики.
+	// Карта и срезы обработчиков не разделяются с другими экземплярами.
+	diagnosticRules diagnosticRules
 	// assertionFuncs — копия переданной карты: версия DSL, затем публичный ID
 	// конкретной грамматики и функция проверки этого ID.
 	assertionFuncs map[string]map[grammar.AssertionID]grammar.AssertionFunc
@@ -56,16 +60,22 @@ type Parser struct {
 }
 
 // New создаёт парсер одного документа, закрепляет reader и result и копирует
-// оба уровня карты утверждений. Функции по ID предоставляет вызывающий код;
-// версия источника выбирается после чтения и проверки байтов.
+// оба уровня карты утверждений, карту и срезы встроенных правил диагностик.
+// Функции по ID предоставляет вызывающий код; версия источника выбирается
+// после чтения и проверки байтов.
 func New(reader io.Reader, result *model.Result, grammars grammar.Registry, registry diagnostics.Registry, assertionFuncs map[string]map[grammar.AssertionID]grammar.AssertionFunc) *Parser {
 	copiedAssertions := maps.Clone(assertionFuncs)
 	for version, assertions := range copiedAssertions {
 		copiedAssertions[version] = maps.Clone(assertions)
 	}
+	copiedDiagnosticRules := maps.Clone(builtinDiagnosticRules())
+	for key, rules := range copiedDiagnosticRules {
+		copiedDiagnosticRules[key] = slices.Clone(rules)
+	}
 	return &Parser{
 		reader: reader, result: result, grammars: grammars, diagnostics: registry,
-		assertionFuncs: copiedAssertions, seenMetadata: make(map[string]int), nextDiagnosticID: 1,
+		diagnosticRules: copiedDiagnosticRules,
+		assertionFuncs:  copiedAssertions, seenMetadata: make(map[string]int), nextDiagnosticID: 1,
 	}
 }
 

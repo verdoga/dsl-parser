@@ -1,0 +1,92 @@
+@dsl-version 1.2
+@document-id FIQJ
+@section Workbook
+@order 50
+@resource-dir Audio
+# REVIEW
+
+### 1 GRAMMAR
+
+@task a
+@instr Tick the past simple sentences that are correct. Correct the mistakes.
+@example {
+A: Did you take these photos?
+B: Yes, I took.
+---
+B: Yes, I did.
+}
+@multifill {
+1. Where did you go?
+2. I didn't saw Azra.
+3. What time you arrived?
+4. Elena didn't get up early.
+5. What did they do?
+6. A: Did you visit your friends?
+B: No, I didn't visit.
+7. Matt didn't read his emails.
+}
+
+@key {
+1. Correct.
+2. I didn't see Azra.
+3. What time did you arrive?
+4. Correct.
+5. Correct.
+6. B No, I didn't.
+7. Correct
+}
+
+### 2 VOCABULARY
+
+@task a
+@instr Correct the mistakes.
+@example {
+The weather's very cold and cloud today.
+---
+The weather's very cold and cloudy today.
+}
+@alt Под упражнением расположены три фотографии: прямая дорожка среди деревьев и кустов, извилистая дорога между деревьями со светлыми кронами и тропический пляж с пальмами в ясную погоду.
+@multifill {
+1. We took train to Milan.
+_____{We took the train to Milan.}{We took a train to Milan.}
+2. We went with plane to Melbourne.
+_____{We went by plane to Melbourne.}{We flew to Melbourne.}{We took a plane to Melbourne.}
+3. This is a photo of the snowy in the garden.
+_____{This is a photo of the snow in the garden.}
+4. A: Did you drive to the station?
+B: No, we went by the bus.
+_____{B: No, we went by bus.}{No, we took the bus.}
+5. It always rainy here in the summer.
+_____{It always rains here in the summer.}{It's always rainy here in the summer.}
+6. Did you go with car to Málaga?
+_____{Did you go by car to Málaga?}{Did you drive to Málaga?}
+7. It was suny and warm yesterday.
+_____{It was sunny and warm yesterday.}
+}
+
+### 3 REVIEW YOUR PROGRESS
+
+@instr {
+Look again at Review Your Progress of the Student's Book. How well can you do these things now?
+3 = very well
+2 = well
+1 = not so well
+}
+I CAN . . .
+@choice talk about travel and holiday experiences. {
+1
+2
+3
+}
+
+@choice Talk about past holidays. {
+1
+2
+3
+}
+
+@choice Make and respond to requests. {
+1
+2
+3
+}
