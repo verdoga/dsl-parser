@@ -62,14 +62,22 @@ func (p *Parser) appendDiagnostic(diagnostic model.Diagnostic) (id string) {
 	return id
 }
 
-// importLineDiagnostics переносит диагностики контекста без повторов кода на
-// одном диапазоне в текущем запуске и привязывает element-диагностики к строке.
+// importLineDiagnostics фильтрует диагностики контекста перед нормализацией
+// и переносит принятые без повторов кода на одном диапазоне в текущем запуске.
+// Element-диагностики привязываются к строке; записи диагностик контекста не меняются.
 // Диагностики прежних запусков сохраняются независимо от совпадения диапазонов.
 func (p *Parser) importLineDiagnostics(context grammar.GrammarContext, line *model.Line) error {
 	if context == nil || line == nil {
 		return fmt.Errorf("не задан контекст или строка для переноса диагностик")
 	}
 	for _, occurrence := range context.Diagnostics() {
+		keep, err := p.acceptGrammarDiagnostic(*line, occurrence)
+		if err != nil {
+			return err
+		}
+		if !keep {
+			continue
+		}
 		if occurrence.DiagnosticCode == diagnostics.P008 && strings.Trim(line.Raw, " \t") != "{" {
 			occurrence.DiagnosticScope = diagnostics.ScopeLine
 		}
@@ -99,6 +107,36 @@ func (p *Parser) importLineDiagnostics(context grammar.GrammarContext, line *mod
 		}
 	}
 	return nil
+}
+
+// acceptGrammarDiagnostic готовит снимок только для подходящего набора правил.
+// Родитель берётся из уже назначенной связи строки, открытый блок — из стека
+// до его обновления. Отсутствие правил сохраняет прежний путь импорта.
+func (p *Parser) acceptGrammarDiagnostic(line model.Line, occurrence model.Diagnostic) (bool, error) {
+	key := diagnosticRuleKey{Version: p.version, Code: occurrence.DiagnosticCode}
+	if len(p.diagnosticRules[key]) == 0 {
+		return true, nil
+	}
+	if p.result == nil {
+		return false, fmt.Errorf("не задана модель для фильтра диагностик")
+	}
+	var parent, openBlock *model.Line
+	if line.ParentLine != nil {
+		number := *line.ParentLine
+		if number < 1 || number > len(p.result.Lines) || number >= line.Number || p.result.Lines[number-1].Number != number {
+			return false, fmt.Errorf("строка %d: фильтру диагностик недоступен родитель %d", line.Number, number)
+		}
+		parent = &p.result.Lines[number-1]
+	}
+	if len(p.openBlocks) > 0 {
+		number := p.openBlocks[len(p.openBlocks)-1]
+		if number < 1 || number > len(p.result.Lines) || number >= line.Number || p.result.Lines[number-1].Number != number {
+			return false, fmt.Errorf("строка %d: фильтру диагностик недоступен открытый блок %d", line.Number, number)
+		}
+		openBlock = &p.result.Lines[number-1]
+	}
+	input := newDiagnosticRuleInput(p.version, occurrence, line, parent, openBlock)
+	return p.diagnosticRules.accept(input)
 }
 
 // linkElementError присоединяет ID element-диагностики к элементу с совпадающим

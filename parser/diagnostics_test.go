@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
@@ -133,6 +134,17 @@ func TestImportP008ElementExceptionOnlyForStandaloneBrace(t *testing.T) {
 			result := parserInitialResult(t)
 			p := New(nil, result, nil, diagnostics.NewRegistry(), nil)
 			p.processingID = "current"
+			p.version = "1.2"
+			calls := 0
+			p.diagnosticRules[diagnosticRuleKey{"1.2", diagnostics.P008}] = []diagnosticRule{
+				func(input diagnosticRuleInput) (diagnosticDecision, error) {
+					calls++
+					if input.Occurrence.DiagnosticScope != diagnostics.ScopeElement {
+						t.Fatal("P008 скорректирована до вызова фильтра")
+					}
+					return diagnosticKeep, nil
+				},
+			}
 			start := 1
 			if raw == " \t{ \t" {
 				start = 3
@@ -140,8 +152,12 @@ func TestImportP008ElementExceptionOnlyForStandaloneBrace(t *testing.T) {
 			line := model.Line{Number: 1, Raw: raw, Elements: []model.Element{{Raw: "{", Start: start, End: start + 1}}}
 			context := grammar.NewContext(raw)
 			context.AddDiagnostic(lineDiagnostic(t, diagnostics.P008, 1, start, start+1))
+			before := parserSnapshot(t, context.Diagnostics())
 			if err := p.importLineDiagnostics(context, &line); err != nil {
 				t.Fatal(err)
+			}
+			if calls != 1 || parserSnapshot(t, context.Diagnostics()) != before {
+				t.Fatal("Фильтр не вызван либо изменена исходная P008")
 			}
 			wantScope, wantLinks := diagnostics.ScopeLine, 0
 			if raw == "{" || raw == " \t{ \t" {
@@ -149,6 +165,203 @@ func TestImportP008ElementExceptionOnlyForStandaloneBrace(t *testing.T) {
 			}
 			if result.Diagnostics[0].DiagnosticScope != wantScope || result.Diagnostics[0].Fatal || len(line.Elements[0].ErrorIDs) != wantLinks {
 				t.Fatalf("Неверное исключение P008: %+v, %+v", result.Diagnostics, line.Elements)
+			}
+		})
+	}
+}
+
+func TestImportDiagnosticFilterDefaultsPreserveResult(t *testing.T) {
+	for _, mode := range []string{"nil", "empty", "other version", "other code", "continue", "keep"} {
+		t.Run(mode, func(t *testing.T) {
+			p := New(nil, parserInitialResult(t), nil, diagnostics.NewRegistry(), nil)
+			p.version, p.processingID = "1.2", "current"
+			p.diagnosticRules = diagnosticRules{}
+			key := diagnosticRuleKey{"1.2", diagnostics.P012}
+			calls := 0
+			rule := func(diagnosticRuleInput) (diagnosticDecision, error) {
+				calls++
+				if mode == "keep" {
+					return diagnosticKeep, nil
+				}
+				return diagnosticContinue, nil
+			}
+			switch mode {
+			case "nil":
+				p.diagnosticRules = nil
+			case "other version":
+				p.diagnosticRules[diagnosticRuleKey{"2.0", key.Code}] = []diagnosticRule{rule}
+			case "other code":
+				p.diagnosticRules[diagnosticRuleKey{key.Version, diagnostics.P008}] = []diagnosticRule{rule}
+			case "continue", "keep":
+				p.diagnosticRules[key] = []diagnosticRule{rule}
+			}
+			if mode != "continue" && mode != "keep" {
+				// Без подходящего правила состояние для снимка не читается.
+				p.openBlocks = []int{99}
+			}
+			line := model.Line{Number: 1, Raw: "{x}", LineType: model.LineTypeContent,
+				Elements: []model.Element{{ElementType: model.ElementTypeContent, Raw: "{x}", Start: 1, End: 4}}}
+			context := grammar.NewContext(line.Raw)
+			context.AddDiagnostic(lineDiagnostic(t, diagnostics.P012, 1, 1, 4))
+			if err := p.importLineDiagnostics(context, &line); err != nil {
+				t.Fatal(err)
+			}
+			want := lineDiagnostic(t, diagnostics.P012, 1, 1, 4)
+			want.ID, want.Source = "d1", "current"
+			want.Message = "Неэкранированная фигурная скобка в текстовом значении"
+			want.RelatedLocations = []model.Location{}
+			if parserSnapshot(t, p.result.Diagnostics) != parserSnapshot(t, []model.Diagnostic{want}) ||
+				!slices.Equal(line.Elements[0].ErrorIDs, []string{"d1"}) || p.nextDiagnosticID != 2 {
+				t.Fatalf("Изменён прежний результат импорта: %+v; %+v", p.result.Diagnostics, line)
+			}
+			wantCalls := 0
+			if mode == "continue" || mode == "keep" {
+				wantCalls = 1
+			}
+			if calls != wantCalls {
+				t.Fatalf("Вызовов фильтра %d, требуется %d", calls, wantCalls)
+			}
+		})
+	}
+}
+
+func TestImportDiagnosticFilterSuppressesBeforeIDsWithoutMutatingContext(t *testing.T) {
+	p := New(nil, parserInitialResult(t), nil, diagnostics.NewRegistry(), nil)
+	p.version, p.processingID = "1.2", "current"
+	blockNumber, parentNumber := 1, 2
+	p.result.Lines = []model.Line{
+		{Number: 1, Raw: "@variants {", LineType: model.LineTypeBlockStart},
+		{Number: 2, Raw: "@task A", LineType: model.LineTypeTag, ParentLine: &blockNumber},
+	}
+	p.openBlocks = []int{blockNumber}
+	value := "{x}"
+	line := model.Line{Number: 3, Raw: value, ParentLine: &parentNumber, LineType: model.LineTypeContent,
+		Elements: []model.Element{{ElementType: model.ElementTypeContent, Raw: value, Value: &value, Start: 1, End: 4}}}
+	context := grammar.NewContext(line.Raw)
+	context.SetLine(line)
+	occurrence := lineDiagnostic(t, diagnostics.P012, 3, 1, 4)
+	occurrence.RelatedLocations = []model.Location{*lineDiagnostic(t, diagnostics.P012, 2, 1, 2).Location}
+	context.AddDiagnostic(occurrence)
+	beforeResult, beforeLine := parserSnapshot(t, p.result), parserSnapshot(t, line)
+	beforeContext, beforeDiagnostics := parserSnapshot(t, context.Line()), parserSnapshot(t, context.Diagnostics())
+	p.diagnosticRules[diagnosticRuleKey{"1.2", diagnostics.P012}] = []diagnosticRule{
+		func(input diagnosticRuleInput) (diagnosticDecision, error) {
+			if input.Parent == nil || input.Parent.Number != 2 || input.OpenBlock == nil || input.OpenBlock.Number != 1 ||
+				input.Element == nil || input.Element.Raw != value || input.Line.ParentLine == nil || *input.Line.ParentLine != 2 {
+				t.Fatalf("Неверный снимок контекста: %+v", input)
+			}
+			input.Occurrence.Location.Start.Column = 99
+			input.Occurrence.RelatedLocations[0].Start.Line = 99
+			*input.Line.ParentLine = 99
+			*input.Line.Elements[0].Value = "changed"
+			input.Element.ErrorIDs = append(input.Element.ErrorIDs, "changed")
+			*input.Parent.ParentLine = 99
+			input.OpenBlock.Raw = "changed"
+			return diagnosticSuppress, nil
+		},
+	}
+	if err := p.importLineDiagnostics(context, &line); err != nil {
+		t.Fatal(err)
+	}
+	if p.nextDiagnosticID != 1 || parserSnapshot(t, p.result) != beforeResult || parserSnapshot(t, line) != beforeLine ||
+		parserSnapshot(t, context.Line()) != beforeContext || parserSnapshot(t, context.Diagnostics()) != beforeDiagnostics ||
+		!slices.Equal(p.openBlocks, []int{1}) {
+		t.Fatal("Подавленная диагностика изменила ID, ссылки, контекст или состояние парсера")
+	}
+	context.AddDiagnostic(lineDiagnostic(t, diagnostics.P003, 3, 1, 4))
+	if err := p.importLineDiagnostics(context, &line); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.result.Diagnostics) != 1 || p.result.Diagnostics[0].ID != "d1" || p.result.Diagnostics[0].DiagnosticCode != diagnostics.P003 ||
+		!slices.Equal(line.Elements[0].ErrorIDs, []string{"d1"}) {
+		t.Fatal("Подавление повлияло на регистрацию следующей диагностики")
+	}
+}
+
+func TestParserInstancesHaveIndependentDiagnosticRules(t *testing.T) {
+	first := inputParser(t, "@dsl-version 1.2\nText {x}")
+	second := inputParser(t, "@dsl-version 1.2\nText {x}")
+	key := diagnosticRuleKey{"1.2", diagnostics.P012}
+	secondRuleCount := len(second.diagnosticRules[key])
+	first.diagnosticRules[key] = []diagnosticRule{func(diagnosticRuleInput) (diagnosticDecision, error) { return diagnosticKeep, nil }}
+	first.diagnosticRules[key][0] = func(diagnosticRuleInput) (diagnosticDecision, error) { return diagnosticSuppress, nil }
+	if len(second.diagnosticRules[key]) != secondRuleCount {
+		t.Fatal("Экземпляры разделяют набор правил")
+	}
+	for _, p := range []*Parser{first, second} {
+		if err := p.Parse(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(first.result.Diagnostics) != 0 || first.result.Document.HasErrors || len(second.result.Diagnostics) != 1 ||
+		second.result.Diagnostics[0].DiagnosticCode != diagnostics.P012 || !second.result.Document.HasErrors {
+		t.Fatal("Правила одного экземпляра повлияли на другой")
+	}
+}
+
+func TestImportDiagnosticFilterKeepPreservesHistoryAndDeduplication(t *testing.T) {
+	p := New(nil, parserInitialResult(t), nil, diagnostics.NewRegistry(), nil)
+	p.version, p.processingID = "1.2", "current"
+	old := lineDiagnostic(t, diagnostics.P012, 1, 1, 4)
+	old.ID, old.Source, old.Message = "d1", "old", "История"
+	p.result.Diagnostics = []model.Diagnostic{old}
+	history := parserSnapshot(t, old)
+	line := model.Line{Number: 1, Raw: "{x}", Elements: []model.Element{{Raw: "{x}", Start: 1, End: 4, ErrorIDs: []string{"d1"}}}}
+	context := grammar.NewContext(line.Raw)
+	first := lineDiagnostic(t, diagnostics.P012, 1, 1, 4)
+	first.Message = "Первое обнаружение"
+	context.AddDiagnostic(first)
+	duplicate := first
+	duplicate.Message = "Повтор"
+	context.AddDiagnostic(duplicate)
+	calls := 0
+	p.diagnosticRules[diagnosticRuleKey{"1.2", diagnostics.P012}] = []diagnosticRule{func(diagnosticRuleInput) (diagnosticDecision, error) {
+		calls++
+		return diagnosticKeep, nil
+	}}
+	for range 2 {
+		if err := p.importLineDiagnostics(context, &line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls != 4 || len(p.result.Diagnostics) != 2 || parserSnapshot(t, p.result.Diagnostics[0]) != history ||
+		p.result.Diagnostics[1].ID != "d2" || p.result.Diagnostics[1].Source != "current" || p.result.Diagnostics[1].Message != first.Message ||
+		!slices.Equal(line.Elements[0].ErrorIDs, []string{"d1", "d2"}) || p.nextDiagnosticID != 3 {
+		t.Fatalf("Нарушены история, дедупликация или ссылки: %+v; %+v", p.result.Diagnostics, line)
+	}
+	p.result.Lines = []model.Line{line}
+	if err := checkElementLinks(p.result); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestImportDiagnosticFilterErrorsStopBeforeRegistration(t *testing.T) {
+	failure := errors.New("ошибка обработчика")
+	for _, mode := range []string{"unknown code", "unknown code with rule", "handler error"} {
+		t.Run(mode, func(t *testing.T) {
+			p := New(nil, parserInitialResult(t), nil, diagnostics.NewRegistry(), nil)
+			p.version, p.processingID = "1.2", "current"
+			code := diagnostics.Code("UNKNOWN")
+			if mode == "handler error" {
+				code = diagnostics.P012
+			}
+			if mode != "unknown code" {
+				p.diagnosticRules[diagnosticRuleKey{"1.2", code}] = []diagnosticRule{func(diagnosticRuleInput) (diagnosticDecision, error) {
+					if mode == "handler error" {
+						return diagnosticSuppress, failure
+					}
+					return diagnosticKeep, nil
+				}}
+			}
+			line := model.Line{Number: 1, Raw: "x", Elements: []model.Element{{Raw: "x", Start: 1, End: 2}}}
+			context := grammar.NewContext(line.Raw)
+			context.AddDiagnostic(lineDiagnostic(t, code, 1, 1, 2))
+			context.AddDiagnostic(lineDiagnostic(t, diagnostics.P003, 1, 1, 2))
+			before := parserSnapshot(t, context.Diagnostics())
+			err := p.importLineDiagnostics(context, &line)
+			if err == nil || (mode == "handler error" && !errors.Is(err, failure)) || len(p.result.Diagnostics) != 0 ||
+				p.nextDiagnosticID != 1 || len(line.Elements[0].ErrorIDs) != 0 || parserSnapshot(t, context.Diagnostics()) != before {
+				t.Fatalf("Изменена обработка технической ошибки: %v", err)
 			}
 		})
 	}
