@@ -32,17 +32,32 @@ func checkSeparator(context grammar.GrammarContext, column int) bool {
 }
 
 // checkRequiredOperand проверяет наличие обязательного отдельного операнда.
-// При отсутствии добавляет P006; true означает, что операнд присутствует.
+// При отсутствии добавляет пустой unparsed и P006 на его диапазоне.
+// true означает, что операнд присутствует.
 // column — колонка вставки отсутствующего операнда, начиная с 1.
 func checkRequiredOperand(context grammar.GrammarContext, present bool, column int) bool {
 	if present {
 		return true
 	}
-	if context != nil && column >= 1 && column <= utf8.RuneCountInString(context.String())+1 {
-		position := model.Position{Line: context.Line().Number, Column: column}
-		addSyntaxDiagnostic(context, diagnostics.P006, model.Location{Start: position, End: position})
-	}
+	addInvalidOperand(context, column, column)
 	return false
+}
+
+// addInvalidOperand сохраняет ошибочный операнд как unparsed с value=nil
+// и добавляет P006 на том же диапазоне. Raw берётся из исходной строки.
+// Колонки отсчитываются по Unicode с 1; endColumn не входит в диапазон.
+// При startColumn=endColumn создаётся пустой элемент отсутствующего операнда.
+// Недопустимость значения устанавливает вызывающий код до добавления элемента.
+func addInvalidOperand(context grammar.GrammarContext, startColumn, endColumn int) {
+	if context == nil || startColumn < 1 || endColumn < startColumn || endColumn > utf8.RuneCountInString(context.String())+1 {
+		return
+	}
+	addElement(context, model.ElementTypeUnparsed, startColumn, endColumn, nil)
+	line := context.Line().Number
+	addSyntaxDiagnostic(context, diagnostics.P006, model.Location{
+		Start: model.Position{Line: line, Column: startColumn},
+		End:   model.Position{Line: line, Column: endColumn},
+	})
 }
 
 // checkAllowedForm проверяет, поддерживает ли известный тег выбранную форму.

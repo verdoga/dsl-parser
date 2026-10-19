@@ -20,7 +20,7 @@ func TestCompleteDiagnosticNormsAndConcreteDetails(t *testing.T) {
 		{diagnostics.IO001, diagnostics.ScopeDocument, true},
 		{diagnostics.P001, diagnostics.ScopeDocument, true}, {diagnostics.P002, diagnostics.ScopeDocument, true},
 		{diagnostics.P003, diagnostics.ScopeElement, false}, {diagnostics.P004, diagnostics.ScopeLine, false},
-		{diagnostics.P005, diagnostics.ScopeLine, false}, {diagnostics.P006, diagnostics.ScopeLine, false},
+		{diagnostics.P005, diagnostics.ScopeLine, false}, {diagnostics.P006, diagnostics.ScopeElement, false},
 		{diagnostics.P007, diagnostics.ScopeLine, false}, {diagnostics.P008, diagnostics.ScopeLine, false},
 		{diagnostics.P009, diagnostics.ScopeLine, false}, {diagnostics.P010, diagnostics.ScopeLine, false},
 		{diagnostics.P011, diagnostics.ScopeBlock, false}, {diagnostics.P012, diagnostics.ScopeElement, false},
@@ -125,6 +125,104 @@ func TestImportLineDiagnosticsDeduplicatesAndLinks(t *testing.T) {
 		if err := p.importLineDiagnostics(context, &model.Line{Number: 2}); err == nil {
 			t.Fatalf("Принят отсутствующий элемент или неизвестный код %s", code)
 		}
+	}
+}
+
+func TestImportP006NormalizesScopeAndLinksExactRange(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw  string
+		start, end int
+	}{
+		{"present Unicode", "Ёж🌍", 2, 5},
+		{"missing", "", 2, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, scope := range []diagnostics.Scope{diagnostics.ScopeElement, diagnostics.ScopeLine} {
+				p := New(nil, parserInitialResult(t), nil, diagnostics.NewRegistry(), nil)
+				p.processingID, p.version = "current", "1.2"
+				line := model.Line{Number: 1, Raw: " " + tc.raw, Elements: []model.Element{
+					{ElementType: model.ElementTypeUnparsed, Raw: tc.raw, Value: nil, Start: tc.start, End: tc.end},
+				}}
+				context := grammar.NewContext(line.Raw)
+				occurrence := lineDiagnostic(t, diagnostics.P006, 1, tc.start, tc.end)
+				occurrence.ID, occurrence.Source = "foreign-id", "foreign-source"
+				occurrence.DiagnosticScope, occurrence.SeverityLevel, occurrence.Fatal = scope, diagnostics.SeverityWarning, true
+				context.AddDiagnostic(occurrence)
+				before := parserSnapshot(t, context.Diagnostics())
+				for range 2 {
+					if err := p.importLineDiagnostics(context, &line); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if len(p.result.Diagnostics) != 1 || parserSnapshot(t, context.Diagnostics()) != before {
+					t.Fatalf("P006 продублирована или изменён исходный случай: %+v", p.result.Diagnostics)
+				}
+				d := p.result.Diagnostics[0]
+				if d.ID == "" || d.ID == occurrence.ID || d.Source != "current" || d.DiagnosticCode != diagnostics.P006 || d.DiagnosticScope != diagnostics.ScopeElement || d.SeverityLevel != diagnostics.SeverityError || d.Fatal || d.Location == nil || *d.Location != *occurrence.Location {
+					t.Fatalf("P006 неверно нормализована или перенесена: %+v", d)
+				}
+				if !slices.Equal(line.Elements[0].ErrorIDs, []string{d.ID}) {
+					t.Fatalf("P006 не связана с unparsed ровно один раз: %+v", line.Elements)
+				}
+				p.result.Lines = []model.Line{line}
+				if err := checkElementLinks(p.result); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestP006InParsedResultPreservesOperandRangesAndLinks(t *testing.T) {
+	type operandRange struct {
+		raw        string
+		start, end int
+	}
+	for _, tc := range []struct {
+		source   string
+		operands []operandRange
+	}{
+		{`@media vidio "Unit 07"`, []operandRange{{"vidio", 8, 13}}},
+		{" \t@media Медиа \"Ёж🌍\"", []operandRange{{"Медиа", 10, 15}}},
+		{"@media", []operandRange{{"", 7, 7}}},
+		{"@media audio", []operandRange{{"", 13, 13}}},
+		{"@media vidio", []operandRange{{"vidio", 8, 13}, {"", 13, 13}}},
+		{"@order", []operandRange{{"", 7, 7}}},
+		{"@order １２", []operandRange{{"１２", 8, 10}}},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			p := inputParser(t, "@dsl-version 1.2\n"+tc.source+"\nText")
+			if err := p.Parse(); err != nil {
+				t.Fatal(err)
+			}
+			result := p.result
+			if len(result.Lines) != 3 || len(result.Diagnostics) != len(tc.operands) || !result.Document.HasErrors || !result.Lines[1].HasErrors || result.Lines[0].HasErrors || result.Lines[2].HasErrors {
+				t.Fatalf("Неверные диагностики или признаки ошибок: %+v", result)
+			}
+			var unparsed []model.Element
+			for _, element := range result.Lines[1].Elements {
+				if element.ElementType == model.ElementTypeUnparsed {
+					unparsed = append(unparsed, element)
+				} else if len(element.ErrorIDs) != 0 {
+					t.Fatalf("P006 привязана к корректному соседнему элементу: %+v", element)
+				}
+			}
+			if len(unparsed) != len(tc.operands) {
+				t.Fatalf("Неверное число unparsed: %+v", unparsed)
+			}
+			ids := make(map[string]bool)
+			for i, want := range tc.operands {
+				element, d := unparsed[i], result.Diagnostics[i]
+				location := model.Location{Start: model.Position{Line: 2, Column: want.start}, End: model.Position{Line: 2, Column: want.end}}
+				if element.Raw != want.raw || element.Value != nil || element.Start != want.start || element.End != want.end || !slices.Equal(element.ErrorIDs, []string{d.ID}) {
+					t.Fatalf("Неверный unparsed или его ссылка: %+v", element)
+				}
+				if d.ID == "" || ids[d.ID] || d.Source != "current" || d.DiagnosticCode != diagnostics.P006 || d.DiagnosticScope != diagnostics.ScopeElement || d.SeverityLevel != diagnostics.SeverityError || d.Fatal || d.Location == nil || *d.Location != location || d.Message != "Отсутствует или недопустим обязательный структурный параметр" {
+					t.Fatalf("Неверная итоговая P006: %+v, требуется диапазон %+v", d, location)
+				}
+				ids[d.ID] = true
+			}
+		})
 	}
 }
 

@@ -85,6 +85,7 @@ func TestParseContentPreservesWholeTextWithoutInterpretation(t *testing.T) {
 	// DSL 1.21, 3.4, 3.6, 4.3: экранирование, ячейки, HTML и плейсхолдеры.
 	for _, text := range []string{
 		`\@note This is ordinary text.`, `\# This is not a heading.`,
+		`\## Vocabulary`, `\### Step 1`, `\#### Title`, `\#Title`, `\###`,
 		`Use \{ and \} as text.`, `Literal underscores: \_____`,
 		"Pronoun | Verb | Short form", "<strong><em>Important information</em></strong>",
 		"<br>", "She _____ in London.", "She _____{lives} in London.",
@@ -106,20 +107,53 @@ func TestParseContentPreservesWholeTextWithoutInterpretation(t *testing.T) {
 	}
 }
 
-func TestInvalidHeadingsRemainPartialWithoutInventedDiagnostic(t *testing.T) {
-	// Ошибки формы из DSL 1.29 и 2.1.1–2.1.5 не превращаются в P003 для тега.
-	for _, source := range []string{"#Title", "#", "##", "### \t", "#### Title", "##### Title", "#\tTitle", "##\u00a0Title"} {
-		t.Run(source, func(t *testing.T) {
-			context := newLineTestContext(t, source)
+func TestInvalidHeadingsCompleteWithUnparsedAndP003(t *testing.T) {
+	for _, test := range []struct {
+		source, raw string
+		start       int
+	}{
+		{"#Title", "#Title", 1},
+		{"#", "#", 1}, {"##", "##", 1}, {"###", "###", 1},
+		{"### \t", "###", 1}, {"# \t", "#", 1}, {"## \t", "##", 1},
+		{"#### Title", "#### Title", 1}, {"##### Title", "##### Title", 1},
+		{"########## Title", "########## Title", 1},
+		{"#\tTitle", "#\tTitle", 1}, {"##\tTitle", "##\tTitle", 1},
+		{"###\tTitle", "###\tTitle", 1}, {"##\u00a0Title", "##\u00a0Title", 1},
+		{"#x 2 WHILE YOU WATCH", "#x 2 WHILE YOU WATCH", 1},
+		{"##x 2 WHILE YOU WATCH", "##x 2 WHILE YOU WATCH", 1},
+		{"###x 2 WHILE YOU WATCH", "###x 2 WHILE YOU WATCH", 1},
+		{"###2 WHILE YOU WATCH", "###2 WHILE YOU WATCH", 1},
+		{" \t#### Ёж🌍 \t", "#### Ёж🌍", 3},
+		{"  #Ошибка🌍  ", "#Ошибка🌍", 3},
+		{"\t###\tЁж🌍 \t", "###\tЁж🌍", 2},
+		{" \t### \t", "###", 3},
+	} {
+		t.Run(test.source, func(t *testing.T) {
+			context := newLineTestContext(t, test.source)
 			before := context.Line()
-			if !classifyLine(context) || context.Line().LineType != model.LineTypeInvalid || parseLine(context) {
-				t.Fatal("Ошибочный заголовок принят за завершённый разбор")
+			if !classifyLine(context) || !parseLine(context) || context.Line().LineType != model.LineTypeInvalid {
+				t.Fatal("Ошибочный заголовок должен завершать разбор как invalid")
 			}
-			parseHeading(context)
-			if len(context.Line().Elements) != 0 || len(context.Diagnostics()) != 0 {
-				t.Fatal("Нераспознанному заголовку назначены неподтверждённые элементы или диагностика")
+			if len(context.Line().Elements) != 1 {
+				t.Fatalf("Требуется один unparsed на значимый фрагмент: %+v", context.Line().Elements)
+			}
+			end := test.start + utf8.RuneCountInString(test.raw)
+			assertOperandElement(t, context.Line().Elements[0], model.Element{ElementType: model.ElementTypeUnparsed, Raw: test.raw, Value: nil, Start: test.start, End: end, ErrorIDs: []string{}})
+			got := context.Diagnostics()
+			if len(got) != 1 {
+				t.Fatalf("Требуется только P003, без дополнительной P015: %+v", got)
+			}
+			location := model.Location{Start: model.Position{Line: 19, Column: test.start}, End: model.Position{Line: 19, Column: end}}
+			if d := got[0]; d.DiagnosticCode != diagnostics.P003 || d.DiagnosticScope != diagnostics.ScopeElement || d.Location == nil || *d.Location != location || d.SeverityLevel != diagnostics.SeverityError || d.Fatal || d.ID != "" || d.Source != "" {
+				t.Fatalf("Требуется нефатальная P003 на диапазоне unparsed %+v: %+v", location, d)
 			}
 			assertLineServiceFields(t, context, before)
+			// Сам читатель заголовка по-прежнему не выделяет level/title из ошибки.
+			reader := newLineTestContext(t, test.source)
+			parseHeading(reader)
+			if len(reader.Line().Elements) != 0 || len(reader.Diagnostics()) != 0 {
+				t.Fatal("Читатель заголовка выделил части ошибочной конструкции")
+			}
 		})
 	}
 }
@@ -200,15 +234,20 @@ func TestLineParsingHonoursAssignedTypeAndUnavailableInput(t *testing.T) {
 			assertLineServiceFields(t, context, line)
 		})
 	}
-	// Тип content направляет к цельному тексту даже при начале, похожем на тег.
-	context := newLineTestContext(t, "@note Text")
-	line := context.Line()
-	line.LineType = model.LineTypeContent
-	context.SetLine(line)
-	if !parseLine(context) || len(context.Line().Elements) != 1 {
-		t.Fatal("Не учтён установленный тип content")
+	// Тип content сохраняет цельный текст, включая похожие на тег и заголовок строки.
+	for _, source := range []string{"@note Text", "#Title", "#### Title", "#", "#\tЁж🌍"} {
+		t.Run("content "+source, func(t *testing.T) {
+			context := newLineTestContext(t, source)
+			line := context.Line()
+			line.LineType = model.LineTypeContent
+			context.SetLine(line)
+			if !parseLine(context) || len(context.Line().Elements) != 1 || context.Line().LineType != model.LineTypeContent || len(context.Diagnostics()) != 0 {
+				t.Fatal("Не учтён установленный тип content")
+			}
+			assertOperandElement(t, context.Line().Elements[0], operandWant(model.ElementTypeContent, source, source, 1))
+			assertLineServiceFields(t, context, line)
+		})
 	}
-	assertOperandElement(t, context.Line().Elements[0], operandWant(model.ElementTypeContent, "@note Text", "@note Text", 1))
 }
 
 func TestLineParsingPreservesExistingResultsAndEndings(t *testing.T) {

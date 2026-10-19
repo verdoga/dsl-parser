@@ -113,8 +113,21 @@ func TestParseMediaFromDSLAndGrammarMutations(t *testing.T) {
 		{"@MEDIA AuDiO 0012", "AuDiO", "audio", "0012", "0012", 8, 14, nil, nil},
 		{"@media VIDEO 12", "VIDEO", "video", "12", "12", 8, 14, nil, nil},
 		{"@media Image 12", "Image", "image", "12", "12", 8, 14, nil, nil},
-		{"@media other 12", "other", "", "12", "12", 8, 14, nil, nil},
-		{"@media Медиа 12", "Медиа", "", "12", "12", 8, 14, nil, nil},
+		{"@media AUDIO 12", "AUDIO", "audio", "12", "12", 8, 14, nil, nil},
+		{"@media ViDeO 12", "ViDeO", "video", "12", "12", 8, 14, nil, nil},
+		{"@media IMAGE 12", "IMAGE", "image", "12", "12", 8, 14, nil, nil},
+		// Все десять ошибочных TYPE из проверки производственного файла.
+		{`@media vidio "Unit 07"`, "vidio", "", `"Unit 07"`, "Unit 07", 8, 14, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 13}}},
+		{"@media other 12", "other", "", "12", "12", 8, 14, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 13}}},
+		{"@media VIDEOx 12", "VIDEOx", "", "12", "12", 8, 15, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 14}}},
+		{"@media 123 12", "123", "", "12", "12", 8, 12, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 11}}},
+		{"@media Медиа 12", "Медиа", "", "12", "12", 8, 14, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 13}}},
+		{"@media vіdeo 12", "vіdeo", "", "12", "12", 8, 14, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 13}}},
+		{"@media audio,video 12", "audio,video", "", "12", "12", 8, 20, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 19}}},
+		{"@media - 12", "-", "", "12", "12", 8, 10, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 9}}},
+		{"@media NULL 12", "NULL", "", "12", "12", 8, 13, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 12}}},
+		{`@media video\x 12`, `video\x`, "", "12", "12", 8, 16, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 15}}},
+		{" \t@media Медиа \"Ёж🌍.png\" \t", "Медиа", "", `"Ёж🌍.png"`, "Ёж🌍.png", 10, 16, []diagnostics.Code{diagnostics.P006}, [][2]int{{10, 15}}},
 		{`@media audio "12"`, "audio", "audio", `"12"`, "12", 8, 14, nil, nil},
 		{`@media audio "a\"b\\.mp3"`, "audio", "audio", `"a\"b\\.mp3"`, `a\"b\\.mp3`, 8, 14, nil, nil},
 		{" \t@media image \"Ёж🌍.png\" \t", "image", "image", `"Ёж🌍.png"`, "Ёж🌍.png", 10, 16, nil, nil},
@@ -123,6 +136,9 @@ func TestParseMediaFromDSLAndGrammarMutations(t *testing.T) {
 		{"@media audio", "audio", "audio", "", "", 8, 0, []diagnostics.Code{diagnostics.P006}, [][2]int{{13, 13}}},
 		{"@media audio  ", "audio", "audio", "", "", 8, 0, []diagnostics.Code{diagnostics.P006}, [][2]int{{15, 15}}},
 		{"@media audio {", "audio", "audio", "", "", 8, 0, []diagnostics.Code{diagnostics.P006}, [][2]int{{14, 14}}},
+		{"@media vidio", "vidio", "", "", "", 8, 0, []diagnostics.Code{diagnostics.P006, diagnostics.P006}, [][2]int{{8, 13}, {13, 13}}},
+		{"@media vidio \t", "vidio", "", "", "", 8, 0, []diagnostics.Code{diagnostics.P006, diagnostics.P006}, [][2]int{{8, 13}, {15, 15}}},
+		{"@media vidio {", "vidio", "", "", "", 8, 0, []diagnostics.Code{diagnostics.P006, diagnostics.P006}, [][2]int{{8, 13}, {14, 14}}},
 		{"@media\taudio\t12", "audio", "audio", "12", "12", 8, 14, []diagnostics.Code{diagnostics.P004, diagnostics.P004}, [][2]int{{7, 8}, {13, 14}}},
 		{`@media audio"12"`, "audio", "audio", `"12"`, "12", 8, 13, []diagnostics.Code{diagnostics.P004}, [][2]int{{13, 14}}},
 		{"@media audio 12 extra", "audio", "audio", "12", "12", 8, 14, []diagnostics.Code{diagnostics.P007}, [][2]int{{17, 22}}},
@@ -137,6 +153,9 @@ func TestParseMediaFromDSLAndGrammarMutations(t *testing.T) {
 		{`@media audio "12"x`, "audio", "audio", `"12"`, "12", 8, 14, []diagnostics.Code{diagnostics.P007}, [][2]int{{18, 19}}},
 		{`@media audio "unclosed`, "audio", "audio", "", "", 8, 0, nil, nil},
 		{`@media audio "a\"`, "audio", "audio", "", "", 8, 0, nil, nil},
+		{`@media vidio "unclosed`, "vidio", "", "", "", 8, 0, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 13}}},
+		{`@media Медиа "Ёж🌍`, "Медиа", "", "", "", 8, 0, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 13}}},
+		{`@media vidio "a\"`, "vidio", "", "", "", 8, 0, []diagnostics.Code{diagnostics.P006}, [][2]int{{8, 13}}},
 		// Пустое выделенное значение не подменяется отсутствующим операндом.
 		{`@media audio ""`, "audio", "audio", `""`, "", 8, 14, nil, nil},
 		{`@media audio "  "`, "audio", "audio", `"  "`, "  ", 8, 14, nil, nil},
@@ -147,12 +166,18 @@ func TestParseMediaFromDSLAndGrammarMutations(t *testing.T) {
 			if test.typeRaw != "" {
 				e := operandWant(model.ElementTypeMediaType, test.typeRaw, test.typeValue, test.typeStart)
 				if test.typeValue == "" {
+					e.ElementType = model.ElementTypeUnparsed
 					e.Value = nil
 				}
 				want = append(want, e)
 			}
 			if test.sourceRaw != "" {
 				want = append(want, operandWant(model.ElementTypeSource, test.sourceRaw, test.sourceValue, test.sourceStart))
+			}
+			for i, code := range test.codes {
+				if location := test.locations[i]; code == diagnostics.P006 && location[0] == location[1] {
+					want = append(want, model.Element{ElementType: model.ElementTypeUnparsed, Raw: "", Value: nil, Start: location[0], End: location[1], ErrorIDs: []string{}})
+				}
 			}
 			parseMedia(context)
 			assertOperandResult(t, context, test.source, want, test.codes, test.locations)
@@ -266,8 +291,23 @@ func assertOperandResult(t *testing.T, context grammar.GrammarContext, source st
 	}
 	for i, d := range got {
 		location := model.Location{Start: model.Position{Line: 19, Column: locations[i][0]}, End: model.Position{Line: 19, Column: locations[i][1]}}
-		if d.DiagnosticCode != codes[i] || d.DiagnosticScope != diagnostics.ScopeLine || d.Location == nil || *d.Location != location || d.ID != "" || d.Source != "" {
+		scope := diagnostics.ScopeLine
+		if codes[i] == diagnostics.P006 {
+			scope = diagnostics.ScopeElement
+		}
+		if d.DiagnosticCode != codes[i] || d.DiagnosticScope != scope || d.Location == nil || *d.Location != location || d.ID != "" || d.Source != "" || d.Fatal || d.SeverityLevel != diagnostics.SeverityError {
 			t.Errorf("Диагностика %+v, требуется %s в %+v", d, codes[i], location)
+		}
+		if codes[i] == diagnostics.P006 {
+			matches := 0
+			for _, element := range line.Elements {
+				if element.ElementType == model.ElementTypeUnparsed && element.Start == location.Start.Column && element.End == location.End.Column && element.Value == nil {
+					matches++
+				}
+			}
+			if matches != 1 {
+				t.Errorf("Для P006 в %+v требуется ровно один unparsed, найдено %d", location, matches)
+			}
 		}
 	}
 }

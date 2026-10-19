@@ -28,7 +28,8 @@ func (p *Parser) collectMetadata(line *model.Line) error {
 }
 
 // checkMetadataRepeat отмечает первое объявление по готовому имени или уровню.
-// true означает повтор одиночного поля: его значение сбрасывается в nil.
+// true означает повтор одиночного поля, исключённый из извлечения метаданных.
+// Первое значение версии сохраняется; остальные одиночные поля сбрасываются в nil.
 // Первоначальная строка версии и повторяемые пути ресурсов не дают true.
 // Строки сохраняют распознанный тип; P003 и новые коды не создаются.
 func (p *Parser) checkMetadataRepeat(line *model.Line) (repeated bool, err error) {
@@ -61,7 +62,6 @@ func (p *Parser) checkMetadataRepeat(line *model.Line) (repeated bool, err error
 	if kind == model.ElementTypeTag {
 		switch *marker {
 		case "dsl-version":
-			field = &p.result.Document.DSLVersion
 		case "document-id":
 			field = &metadata.DocumentID
 		case "section":
@@ -90,7 +90,10 @@ func (p *Parser) checkMetadataRepeat(line *model.Line) (repeated bool, err error
 		p.seenMetadata[key] = line.Number
 		return false, nil
 	}
-	if field == nil || (key == "@dsl-version" && first == 1 && line.Number == 1) {
+	if key == "@dsl-version" {
+		return line.Number != first, nil
+	}
+	if field == nil {
 		return false, nil
 	}
 	*field = nil

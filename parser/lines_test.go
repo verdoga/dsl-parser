@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/verdoga/dsl-parser/diagnostics"
 	"github.com/verdoga/dsl-parser/grammar"
@@ -56,7 +57,6 @@ func TestUnfinishedLinesPreserveParsedElementsAndContinue(t *testing.T) {
 		retained int
 		kind     model.LineType
 	}{
-		{"  #Ошибка🌍  ", 0, model.LineTypeInvalid},
 		{`@media audio "Незавершённый🌍`, 2, model.LineTypeTag},
 		{`@resource-dir Known, "Незавершённый`, 2, model.LineTypeTag},
 		{`@resource-dir "Bad"x, Known`, 2, model.LineTypeTag},
@@ -98,6 +98,252 @@ func TestUnfinishedLinesPreserveParsedElementsAndContinue(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestInvalidHeadingsProduceOnlyP003AndParsingContinues(t *testing.T) {
+	for _, raw := range []string{"  #Ошибка🌍  ", "#### Title", "##### Title", "########## Title", "#x Title", "##x Title", "###x Title", "###Title", "###\tTitle", "###", " \t### \t"} {
+		t.Run(raw, func(t *testing.T) {
+			p := inputParser(t, "@dsl-version 1.2\n"+raw+"\n@document-id Next\n## Valid\nText")
+			if err := p.Parse(); err != nil {
+				t.Fatal(err)
+			}
+			if len(p.result.Lines) != 5 || len(p.result.Diagnostics) != 1 || !p.result.Document.HasErrors {
+				t.Fatalf("Требуется одна P003 без дополнительной P015: %+v", p.result)
+			}
+			assertWholeLineP003(t, p.result.Lines[1], p.result.Diagnostics[0])
+			if p.result.Lines[1].Raw != raw || p.result.Document.Metadata.DocumentID == nil || *p.result.Document.Metadata.DocumentID != "Next" || p.result.Document.Metadata.Subtitle == nil || *p.result.Document.Metadata.Subtitle != "Valid" {
+				t.Fatal("Утрачен ошибочный заголовок или метаданные последующих строк")
+			}
+			if p.result.Lines[2].LineType != model.LineTypeTag || p.result.Lines[3].LineType != model.LineTypeHeading || p.result.Lines[4].LineType != model.LineTypeContent {
+				t.Fatal("Изменён разбор после ошибочного заголовка")
+			}
+			for _, i := range []int{0, 2, 3, 4} {
+				if p.result.Lines[i].HasErrors {
+					t.Fatalf("Ошибка заголовка перенесена на строку %d", i+1)
+				}
+			}
+		})
+	}
+}
+
+func TestRepeatedVersionsSkipGrammarAndPreserveBlocks(t *testing.T) {
+	repeats := []string{
+		"@dsl-version 1.2", "@dsl-version 2.0", "@dsl-version banana", "@dsl-version", "@dsl-version \t",
+		`@dsl-version "unclosed`, "@dsl-version 1.2 {", "@dsl-version 1.2 }", "@dsl-version 1.2 extra",
+		"@dsl-version 1.2 @task B", "@DSL-VERSION 2.0", " \t@DsL-VeRsIoN banana🌍 \t", "@dsl-version\t2.0",
+		"@dsl-version{", "@dsl-version}", `@dsl-version"unclosed`,
+	}
+	for _, nested := range []bool{false, true} {
+		t.Run(map[bool]string{false: "root", true: "nested blocks and task"}[nested], func(t *testing.T) {
+			prefix := []string{"@dsl-version 1.2"}
+			var suffix []string
+			var wantBlocks, wantParents []int
+			if nested {
+				prefix = append(prefix, "@variants {", "@task A", "@choice {")
+				suffix = []string{"@variant Answer", "}", "Text in task", "@endtask", "}"}
+				wantBlocks, wantParents = []int{2, 4}, []int{3}
+			}
+			suffix = append(suffix, "@document-id Next", "@order 0010", "Text")
+			lines := append(append(slices.Clone(prefix), repeats...), suffix...)
+			p := inputParser(t, strings.Join(lines, "\r\n"))
+			calls := recordLineGrammarCalls(t, p)
+			registered, _ := p.grammars.Lookup("1.2")
+			enter, _ := registered.Assertions()
+			check := p.assertionFuncs["1.2"][enter]
+			checked := 0
+			p.assertionFuncs["1.2"][enter] = func(input grammar.AssertionInput) bool {
+				if input.Line.Number > len(prefix) && input.Line.Number <= len(prefix)+len(repeats) {
+					checked++
+					if !slices.Equal(p.openBlocks, wantBlocks) || !slices.Equal(p.parents, wantParents) {
+						t.Fatalf("Повтор версии изменил стеки: blocks=%v, parents=%v", p.openBlocks, p.parents)
+					}
+				}
+				return check(input)
+			}
+			if err := p.Parse(); err != nil {
+				t.Fatal(err)
+			}
+			result := p.result
+			if len(result.Lines) != len(lines) || len(result.Diagnostics) != len(repeats) || checked != len(repeats) || !result.Document.HasErrors {
+				t.Fatalf("Неверное число строк, P003 или проверок состояния: lines=%d, diagnostics=%+v, checks=%d", len(result.Lines), result.Diagnostics, checked)
+			}
+			var wantCalls []lineGrammarCall
+			for i, raw := range lines {
+				line := result.Lines[i]
+				if line.Raw != raw || line.Number != i+1 || (i < len(lines)-1 && line.LineEnding != model.LineEndingCRLF) || (i == len(lines)-1 && line.LineEnding != model.LineEndingNone) {
+					t.Fatalf("Изменена физическая строка %d: %+v", i+1, line)
+				}
+				if i >= len(prefix) && i < len(prefix)+len(repeats) {
+					assertWholeLineP003(t, line, result.Diagnostics[i-len(prefix)])
+					if nested {
+						if line.ParentLine == nil || *line.ParentLine != 4 || line.NestingLevel != 3 {
+							t.Fatal("Повтор версии изменил текущего родителя")
+						}
+					} else if line.ParentLine != nil || line.NestingLevel != 0 {
+						t.Fatal("Повтор версии создал вложенность на корневом уровне")
+					}
+				} else {
+					wantCalls = append(wantCalls, lineGrammarCall{"detect", i + 1}, lineGrammarCall{"orchestrate", i + 1})
+					if line.HasErrors {
+						t.Fatalf("Ошибка повтора перенесена на строку %d", i+1)
+					}
+				}
+			}
+			if !slices.Equal(*calls, wantCalls) {
+				t.Fatalf("Повтор передан грамматике либо пропущена обычная строка: %+v, требуется %+v", *calls, wantCalls)
+			}
+			if result.Document.DSLVersion == nil || *result.Document.DSLVersion != "1.2" || p.version != "1.2" || p.seenMetadata["@dsl-version"] != 1 || len(result.Lines[0].Elements) != 2 || result.Lines[0].Elements[1].ElementType != model.ElementTypeVersion {
+				t.Fatal("Изменена первая версия или выбранная грамматика")
+			}
+			if result.Document.Metadata.DocumentID == nil || *result.Document.Metadata.DocumentID != "Next" || result.Document.Metadata.Order == nil || *result.Document.Metadata.Order != "0010" || len(p.openBlocks) != 0 || len(p.parents) != 0 {
+				t.Fatal("Повторы помешали разбору последующих метаданных или закрытию блоков")
+			}
+			if nested {
+				start := len(prefix) + len(repeats)
+				for i, parent := range []int{4, 4, 3, 2, 2} {
+					line := result.Lines[start+i]
+					if line.ParentLine == nil || *line.ParentLine != parent || line.NestingLevel != result.Lines[parent-1].NestingLevel+1 {
+						t.Fatalf("Нарушена вложенность следующей строки: %+v", line)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestVersionGuardRespectsTagBoundariesAndEscaping(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		kind model.LineType
+	}{
+		{`\@dsl-version 2.0`, model.LineTypeContent},
+		{" \t\\@DSL-VERSION \"unclosed", model.LineTypeContent},
+		{"Text @dsl-version banana", model.LineTypeContent},
+		{"@dsl-versionx 2.0", model.LineTypeInvalid},
+		{"@dsl-version-extra 1.2", model.LineTypeInvalid},
+		{"@dsl-version1.2", model.LineTypeInvalid},
+		{"@dsl-version\u00a01.2", model.LineTypeInvalid},
+		{`@dsl-version\{`, model.LineTypeInvalid},
+		{`@dsl-version\"1.2`, model.LineTypeInvalid},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			p := inputParser(t, "@dsl-version 1.2\n"+tc.raw+"\n@document-id Next")
+			calls := recordLineGrammarCalls(t, p)
+			if err := p.Parse(); err != nil {
+				t.Fatal(err)
+			}
+			wantCalls := []lineGrammarCall{{"detect", 1}, {"orchestrate", 1}, {"detect", 2}, {"orchestrate", 2}, {"detect", 3}, {"orchestrate", 3}}
+			if !slices.Equal(*calls, wantCalls) {
+				t.Fatalf("Неточное или экранированное имя ошибочно отсечено до грамматики: %+v", *calls)
+			}
+			line := p.result.Lines[1]
+			if line.LineType != tc.kind || len(line.Elements) != 1 || line.Raw != tc.raw {
+				t.Fatalf("Неверный разбор контрольной строки: %+v", line)
+			}
+			if tc.kind == model.LineTypeContent {
+				raw := strings.Trim(tc.raw, " \t")
+				if len(p.result.Diagnostics) != 0 || line.HasErrors || line.Elements[0].ElementType != model.ElementTypeContent || line.Elements[0].Raw != raw || line.Elements[0].Value == nil || *line.Elements[0].Value != raw {
+					t.Fatal("Экранированная запись или содержимое интерпретированы как объявление версии")
+				}
+			} else if len(p.result.Diagnostics) != 1 || p.result.Diagnostics[0].DiagnosticCode != diagnostics.P003 || line.Elements[0].ElementType != model.ElementTypeUnparsed {
+				t.Fatal("Неизвестное имя не прошло обычную диагностику грамматики")
+			}
+			if p.result.Document.DSLVersion == nil || *p.result.Document.DSLVersion != "1.2" || p.seenMetadata["@dsl-version"] != 1 || p.result.Document.Metadata.DocumentID == nil || *p.result.Document.Metadata.DocumentID != "Next" {
+				t.Fatal("Контрольная строка изменила версию или последующие метаданные")
+			}
+		})
+	}
+}
+
+func TestRepeatedVersionInsideTextBlocksRemainsContent(t *testing.T) {
+	for _, tag := range []string{"editor", "example", "wordlist", "table", "script", "text", "key", "note", "alt", "hint", "answer", "multifill"} {
+		t.Run(tag, func(t *testing.T) {
+			content := []string{"@dsl-version 2.0", "@DSL-VERSION banana", "@dsl-version", `@dsl-version "unclosed`, "@document-id Hidden", "@order garbage", "#Title", `\@dsl-version 1.2`}
+			lines := append([]string{"@dsl-version 1.2", "@" + tag + " {"}, content...)
+			lines = append(lines, "}", "@dsl-version 2.0", "@document-id Visible", "Text")
+			outside := len(content) + 4
+			p := inputParser(t, strings.Join(lines, "\n"))
+			calls := recordLineGrammarCalls(t, p)
+			if err := p.Parse(); err != nil {
+				t.Fatal(err)
+			}
+			result := p.result
+			if len(result.Lines) != len(lines) || len(result.Diagnostics) != 1 {
+				t.Fatalf("Текстовый блок получил лишние диагностики или потерял строки: %+v", result)
+			}
+			for i, raw := range content {
+				line := result.Lines[i+2]
+				if line.LineType != model.LineTypeContent || len(line.Elements) != 1 || line.ParentLine == nil || *line.ParentLine != 2 || line.NestingLevel != 1 || line.HasErrors {
+					t.Fatalf("Содержимое блока интерпретировано как DSL: %+v", line)
+				}
+				element := line.Elements[0]
+				if element.ElementType != model.ElementTypeContent || element.Raw != raw || element.Value == nil || *element.Value != raw || element.Start != 1 || element.End != utf8.RuneCountInString(raw)+1 || len(element.ErrorIDs) != 0 {
+					t.Fatalf("Изменено содержимое текстового блока: %+v", element)
+				}
+			}
+			assertWholeLineP003(t, result.Lines[outside-1], result.Diagnostics[0])
+			var wantCalls []lineGrammarCall
+			for number := 1; number <= len(lines); number++ {
+				if number != outside {
+					wantCalls = append(wantCalls, lineGrammarCall{"detect", number}, lineGrammarCall{"orchestrate", number})
+				}
+			}
+			if !slices.Equal(*calls, wantCalls) {
+				t.Fatalf("Не соблюдена граница текстового режима: %+v", *calls)
+			}
+			closing := result.Lines[outside-2]
+			if closing.LineType != model.LineTypeBlockEnd || closing.ParentLine == nil || *closing.ParentLine != 2 || result.Lines[outside-1].ParentLine != nil || len(p.openBlocks) != 0 || len(p.parents) != 0 {
+				t.Fatal("Изменены закрытие текстового блока или последующая вложенность")
+			}
+			if result.Document.DSLVersion == nil || *result.Document.DSLVersion != "1.2" || p.version != "1.2" || p.seenMetadata["@dsl-version"] != 1 || result.Document.Metadata.DocumentID == nil || *result.Document.Metadata.DocumentID != "Visible" || result.Document.Metadata.Order != nil || result.Document.Metadata.Title != nil {
+				t.Fatal("Текст блока изменил версию или метаданные")
+			}
+		})
+	}
+}
+
+type lineGrammarCall struct {
+	phase  string
+	number int
+}
+
+// Как в TestLineRoutesCallRegisteredFunctionsInOrder, сохраняем настоящую
+// грамматику и записываем вызовы её зарегистрированных точек входа.
+func recordLineGrammarCalls(t *testing.T, p *Parser) *[]lineGrammarCall {
+	t.Helper()
+	registered, found := p.grammars.Lookup("1.2")
+	if !found || len(registered.DetectionFuncs()) != 1 || len(registered.OrchestrationFuncs()) != 1 {
+		t.Fatal("Не зарегистрированы ожидаемые точки входа GR12")
+	}
+	var calls []lineGrammarCall
+	detect, orchestrate := registered.DetectionFuncs()[0], registered.OrchestrationFuncs()[0]
+	enter, leave := registered.Assertions()
+	p.grammars.Register("1.2", []grammar.DetectionFunc{func(c grammar.GrammarContext) bool {
+		calls = append(calls, lineGrammarCall{"detect", c.Line().Number})
+		return detect(c)
+	}}, []grammar.OrchestrationFunc{func(c grammar.GrammarContext) bool {
+		calls = append(calls, lineGrammarCall{"orchestrate", c.Line().Number})
+		return orchestrate(c)
+	}}, registered.LineTypeFuncs(), registered.LineParserFuncs(), enter, leave)
+	return &calls
+}
+
+func assertWholeLineP003(t *testing.T, line model.Line, d model.Diagnostic) {
+	t.Helper()
+	if line.LineType != model.LineTypeInvalid || !line.HasErrors || len(line.Elements) != 1 {
+		t.Fatalf("Требуется invalid с единственным unparsed: %+v", line)
+	}
+	raw := strings.Trim(line.Raw, " \t")
+	start := utf8.RuneCountInString(line.Raw) - utf8.RuneCountInString(strings.TrimLeft(line.Raw, " \t")) + 1
+	end := start + utf8.RuneCountInString(raw)
+	element := line.Elements[0]
+	if element.ElementType != model.ElementTypeUnparsed || element.Raw != raw || element.Value != nil || element.Start != start || element.End != end || !slices.Equal(element.ErrorIDs, []string{d.ID}) {
+		t.Fatalf("Строка разобрана по частям или потеряла диапазон/ссылку: %+v", element)
+	}
+	location := model.Location{Start: model.Position{Line: line.Number, Column: start}, End: model.Position{Line: line.Number, Column: end}}
+	if d.ID == "" || d.Source != "current" || d.DiagnosticCode != diagnostics.P003 || d.DiagnosticScope != diagnostics.ScopeElement || d.SeverityLevel != diagnostics.SeverityError || d.Fatal || d.Location == nil || *d.Location != location {
+		t.Fatalf("Неверная P003: %+v, требуется диапазон %+v", d, location)
 	}
 }
 

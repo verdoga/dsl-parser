@@ -2,8 +2,10 @@ package parser
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/verdoga/dsl-parser/diagnostics"
 	"github.com/verdoga/dsl-parser/grammar"
 	"github.com/verdoga/dsl-parser/model"
 )
@@ -170,7 +172,7 @@ func TestMetadataIgnoresContentAndUnrecognizedMarkers(t *testing.T) {
 	}
 }
 
-func TestVersionFirstLineIsNotRepeatAndLaterDeclarationsCannotRestoreIt(t *testing.T) {
+func TestVersionFirstLineIsNotRepeatAndLaterDeclarationsPreserveIt(t *testing.T) {
 	p := inputParser(t, "@dsl-version 1.2\nText")
 	if _, ready, err := p.prepareInput(); err != nil || !ready {
 		t.Fatalf("Подготовка: ready=%t, err=%v", ready, err)
@@ -185,15 +187,74 @@ func TestVersionFirstLineIsNotRepeatAndLaterDeclarationsCannotRestoreIt(t *testi
 	if p.result.Document.DSLVersion == nil || *p.result.Document.DSLVersion != "1.2" {
 		t.Fatal("Исходная версия потеряна")
 	}
-	for i, raw := range []string{"@dsl-version 2.0", "@dsl-version 1.2"} {
+	metadata := parserSnapshot(t, p.result.Document.Metadata)
+	for i, raw := range []string{"@dsl-version 2.0", "@dsl-version banana", "@DSL-VERSION 1.2", "@dsl-version", "@dsl-version 1.x", "@dsl-version 1.2"} {
 		line := metadataLine(t, p, raw, i+2)
 		before := parserSnapshot(t, line)
+		if repeated, err := p.checkMetadataRepeat(&line); err != nil || !repeated {
+			t.Fatalf("Повтор %d не распознан: repeated=%t, err=%v", i+1, repeated, err)
+		}
 		if err := p.collectMetadata(&line); err != nil {
 			t.Fatal(err)
 		}
-		if p.result.Document.DSLVersion != nil || p.version != "1.2" || p.seenMetadata["@dsl-version"] != 1 || parserSnapshot(t, line) != before || len(p.result.Diagnostics) != 0 {
-			t.Fatal("Повтор версии обработан неверно")
+		if p.result.Document.DSLVersion == nil || *p.result.Document.DSLVersion != "1.2" || p.version != "1.2" || p.seenMetadata["@dsl-version"] != 1 {
+			t.Fatalf("Повтор %d изменил первое значение версии, грамматику или отметку объявления", i+1)
 		}
+		if parserSnapshot(t, line) != before || parserSnapshot(t, p.result.Document.Metadata) != metadata || len(p.result.Diagnostics) != 0 {
+			t.Fatal("Сбор метаданных повтора изменил строки, метаданные или создал повторную диагностику")
+		}
+	}
+}
+
+func TestOrderMetadataRejectsInvalidAndPreservesExactValidValues(t *testing.T) {
+	tests := []struct {
+		name, raw string
+		valid     bool
+	}{
+		{"one", "1", true},
+		{"leading zeros", "0010", true},
+		{"large production mutation", "999999999999999999999999999999999999999999", true},
+		{"long number", strings.Repeat("1234567890", 410), true},
+		{"long zero prefix", strings.Repeat("0", 4096) + "1", true},
+	}
+	for _, raw := range []string{"", "garbage", "0", "000", "-1", "1.5", "NaN", "10abc", "+1", "+", "-", "1e3", "0x10", "0b10", "0o10", "1_000", "１２", "١٠"} {
+		tests = append(tests, struct {
+			name, raw string
+			valid     bool
+		}{"invalid " + raw, raw, false})
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := inputParser(t, "@dsl-version 1.2\n@order "+tc.raw+"\n@document-id Next")
+			if err := p.Parse(); err != nil {
+				t.Fatal(err)
+			}
+			result := p.result
+			if len(result.Lines) != 3 || result.Document.Metadata.DocumentID == nil || *result.Document.Metadata.DocumentID != "Next" || result.Lines[2].HasErrors || p.seenMetadata["@order"] != 2 {
+				t.Fatal("ORDER изменил последующие метаданные или отметку первого объявления")
+			}
+			line := result.Lines[1]
+			if line.LineType != model.LineTypeTag || len(line.Elements) != 2 {
+				t.Fatalf("Неверный состав ORDER: %+v", line)
+			}
+			operand := line.Elements[1]
+			if operand.Raw != tc.raw {
+				t.Fatal("Утрачен исходный операнд ORDER")
+			}
+			if tc.valid {
+				if result.Document.Metadata.Order == nil || *result.Document.Metadata.Order != tc.raw || operand.ElementType != model.ElementTypeNumber || operand.Value == nil || *operand.Value != tc.raw || len(operand.ErrorIDs) != 0 || len(result.Diagnostics) != 0 || result.Document.HasErrors || line.HasErrors {
+					t.Fatal("Корректный ORDER потерян, преобразован в машинное число или получил ошибку")
+				}
+			} else {
+				if result.Document.Metadata.Order != nil || operand.ElementType != model.ElementTypeUnparsed || operand.Value != nil || len(result.Diagnostics) != 1 || !result.Document.HasErrors || !line.HasErrors {
+					t.Fatalf("Ошибочный ORDER попал в метаданные или не диагностирован: %+v", result)
+				}
+				d := result.Diagnostics[0]
+				if d.DiagnosticCode != diagnostics.P006 || d.DiagnosticScope != diagnostics.ScopeElement || !slices.Equal(operand.ErrorIDs, []string{d.ID}) {
+					t.Fatalf("Ошибочный ORDER не связан с P006: %+v", d)
+				}
+			}
+		})
 	}
 }
 

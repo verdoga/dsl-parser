@@ -48,18 +48,78 @@ func TestCheckRequiredOperandUsesInsertionPosition(t *testing.T) {
 		present bool
 		column  int
 	}{
-		{"@task ID", true, 7}, {"@task", false, 6}, {"@fragment {", false, 11}, {"Ж🌍", false, 3},
+		{"@task ID", true, 7}, {"@task Ёж🌍", true, 7},
+		{"@task", false, 6}, {"@fragment {", false, 11},
+		{"Ж🌍", false, 3}, {"Ж🌍 \t", false, 5}, {"", false, 1},
 	} {
 		t.Run(test.source, func(t *testing.T) {
 			context := newSyntaxContext(t, test.source)
+			if test.present {
+				value := string([]rune(test.source)[test.column-1:])
+				addElement(context, model.ElementTypeIdentifier, test.column, utf8.RuneCountInString(test.source)+1, &value)
+			}
+			before := syntaxLineSnapshot(t, context)
 			if got := checkRequiredOperand(context, test.present, test.column); got != test.present {
 				t.Errorf("checkRequiredOperand() = %t, требуется %t", got, test.present)
 			}
-			code := diagnostics.P006
 			if test.present {
-				code = ""
+				assertSyntaxDiagnostic(t, context, "", diagnostics.ScopeElement, test.column, test.column)
+				if syntaxLineSnapshot(t, context) != before {
+					t.Fatal("Присутствующий операнд изменён или добавлен лишний элемент")
+				}
+				return
 			}
-			assertSyntaxDiagnostic(t, context, code, diagnostics.ScopeLine, test.column, test.column)
+			assertSyntaxDiagnostic(t, context, diagnostics.P006, diagnostics.ScopeElement, test.column, test.column)
+			line := context.Line()
+			if len(line.Elements) != 1 {
+				t.Fatalf("Элементы %+v, требуется один пустой unparsed", line.Elements)
+			}
+			element := line.Elements[0]
+			if element.ElementType != model.ElementTypeUnparsed || element.Raw != "" || element.Value != nil ||
+				element.Start != test.column || element.End != test.column || len(element.ErrorIDs) != 0 {
+				t.Fatalf("Неверный элемент отсутствующего операнда: %+v", element)
+			}
+			if line.Raw != test.source || line.Number != 7 || line.LineType != model.LineTypeTag {
+				t.Fatal("Оформление отсутствующего операнда изменило исходную строку")
+			}
+			if d := context.Diagnostics()[0]; d.Fatal || d.SeverityLevel != diagnostics.SeverityError {
+				t.Fatalf("P006 должна быть нефатальной ошибкой: %+v", d)
+			}
+		})
+	}
+}
+
+func TestAddInvalidOperandPreservesUnicodeRangeAndRaw(t *testing.T) {
+	for _, test := range []struct {
+		source, raw string
+		start, end  int
+	}{
+		{`@media vidio "Unit 07"`, "vidio", 8, 13},
+		{"@order garbage", "garbage", 8, 15},
+		{`@media Медиа "Unit 07"`, "Медиа", 8, 13},
+		{"Ж🌍 @order NaN \t", "NaN", 11, 14},
+		{"@media e\u0301🌍 \"Unit 07\"", "e\u0301🌍", 8, 11},
+		{`@media video\x "Unit 07"`, `video\x`, 8, 15},
+	} {
+		t.Run(test.source, func(t *testing.T) {
+			context := newSyntaxContext(t, test.source)
+			addInvalidOperand(context, test.start, test.end)
+			assertSyntaxDiagnostic(t, context, diagnostics.P006, diagnostics.ScopeElement, test.start, test.end)
+			line := context.Line()
+			if len(line.Elements) != 1 {
+				t.Fatalf("Элементы %+v, требуется один unparsed", line.Elements)
+			}
+			element := line.Elements[0]
+			if element.ElementType != model.ElementTypeUnparsed || element.Raw != test.raw || element.Value != nil ||
+				element.Start != test.start || element.End != test.end || len(element.ErrorIDs) != 0 {
+				t.Fatalf("Неверный элемент ошибочного операнда: %+v", element)
+			}
+			if line.Raw != test.source || context.String() != test.source || line.Number != 7 || line.LineType != model.LineTypeTag {
+				t.Fatal("Оформление ошибочного операнда изменило исходную строку")
+			}
+			if d := context.Diagnostics()[0]; d.Fatal || d.SeverityLevel != diagnostics.SeverityError {
+				t.Fatalf("P006 должна быть нефатальной ошибкой: %+v", d)
+			}
 		})
 	}
 }
@@ -298,6 +358,7 @@ func TestSyntaxChecksIgnoreUnavailableInput(t *testing.T) {
 				for _, bounds := range [][2]int{{0, 1}, {2, 1}, {1, utf8.RuneCountInString(source) + 2}} {
 					checkStrayBrace(input, bounds[0], bounds[1])
 					addElement(input, model.ElementTypeContent, bounds[0], bounds[1], nil)
+					addInvalidOperand(input, bounds[0], bounds[1])
 				}
 				checkOpeningTail(input, 1)
 				checkClosingTail(input, 1)

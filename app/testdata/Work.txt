@@ -1,0 +1,170 @@
+@dsl-version 1.2
+@document-id NKRY
+@section Additional resources
+@order 10
+@resource-dir Video
+# DOCUMENTARY VIDEO
+
+### 1 BEFORE YOU WATCH
+
+@task a
+@instr What is a flea market?
+@choice A place where people buy and sell ... . {
+old things
+only new things
+@answer both old and new things
+}
+
+@task b
+@speaking
+@instr Work in pairs. Ask and answer the questions.
+@text {
+1. Do you like buying old things or new things?
+2. Where do you buy them?
+a. markets
+b. local shops
+c. shopping centres
+d. online
+}
+
+@task c
+@instr Look at pictures 1–5. Match the pictures with the words in the box.
+@alt {
+Пять пронумерованных фотографий товаров и объектов.
+1. Несколько длинных кусков узорчатой ткани свисают с перекладин.
+2. Кусочки еды нанизаны на металлические шампуры и готовятся над жаровней.
+3. Ряды расписных полых фигурок разного размера в форме женщин; меньшие фигурки помещаются внутрь больших.
+4. Два небольших тёмных насекомых на светлой поверхности, показанные крупным планом.
+5. Несколько открытых насыпей мелких сыпучих продуктов на рыночном прилавке. На табличках различимы слова SPICE и SOUP SPICE.
+}
+@matching {
+Photo 1
+@answer scarves
+Photo 2
+@answer kebabs
+Photo 3
+@answer Russian dolls
+Photo 4
+@answer fleas
+Photo 5
+@answer spices
+---
+kebabs
+spices
+scarves
+fleas
+Russian dolls
+}
+
+### 2 WHILE YOU WATCH
+
+@task a
+@media video "Unit 07"
+@instr Watch the video about flea markets. What is a good title for the video?
+1. Flea Markets Old and New
+2. Interesting Things to Buy at a Flea Market
+3. Flea Markets around the World
+
+@task b
+@media vidio "Unit 07"
+@instr Watch again. What things can you buy at the different flea markets? Match the pictures with the words in the box. Some words are not used.
+@alt {
+Начало тифлокомментария:
+Четыре пронумерованные фотографии рынков, расположенные по две в ряд.
+1. Узкий крытый проход между торговыми местами. Слева выставлены тарелки и другие предметы, справа висят одежда и головные уборы; в проходе стоят и идут люди.
+2. Вид сверху на большой многолюдный рынок внутри открытого многоуровневого здания с навесом. На нижнем уровне стоят многочисленные торговые столы.
+3. Вид на декоративный архитектурный комплекс с башнями, остроконечными крышами и куполами за оградой.
+4. Толпа людей у большого арочного входа в крытый рынок. Над аркой написано KAPALICARSI GRAND BAZAR; по сторонам находятся магазины и уличные прилавки.
+Конец тифлокомментария.
+}
+@matching {
+1. Les Puces, Paris, France
+@answer {
+paintings
+tables
+}
+2. Ecants, Barcelona, Spain
+@answer {
+clothes
+chairs
+}
+3. Izmailovsky, Moscow, Russia
+@answer {
+fur hats
+kebabs
+}
+4. Grand Bazaar, Istanbul, Turkey
+@answer {
+gold
+lanterns
+}
+---
+clothes
+gold
+computers
+paintings
+fur hats
+hamburgers
+chairs
+lanterns
+tables
+kebabs
+watches
+}
+
+@task c
+@media vidio "Unit 07"
+@instr Watch again. Are the sentences true (T) or false (F)?
+@choice 1. The Paris flea market started about 200 years ago. {
+@answer True.
+False.
+}
+
+@choice 2. The English phrase flea market comes from a French word. {
+@answer True.
+False.
+}
+
+@choice 3. Today, the Ecants market in Barcelona is in a new building. {
+@answer True.
+False.
+}
+
+@choice 4. People can buy gold at the Izmailovsky market in Russia. {
+True.
+@answer False.
+}
+
+@choice 5. Many tourists visit the Grand Bazaar in Turkey. {
+@answer True.
+False.
+}
+
+### 3 AFTER YOU WATCH
+
+@task a
+@instr Describe a market you know in your country or another country. Complete the chart with the words in the box and your own ideas.
+@wordlist {
+old
+new
+big
+small
+indoors
+outdoors
+food
+clothes
+fun
+interesting
+}
+@multifill {
+Age: _____
+Size: _____
+Place: _____
+Things you can buy: _____
+I like it because it's ...: _____
+}
+
+@task b
+@speaking
+@instr Tell your partner about your market.
+@question Are your markets the same or different?
