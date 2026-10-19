@@ -54,7 +54,8 @@ func (p *Parser) parseLines(lines []model.Line) error {
 }
 
 // parseLine создаёт контекст одной строки с диагностическим реестром и
-// утверждениями выбранной версии. Все строки проходят детекцию и оркестрацию.
+// утверждениями выбранной версии. Повтор версии отсекается до детекции
+// и оркестрации; остальные строки проходят обе стадии.
 // Для содержимого парсер заранее устанавливает content или blank через SetLine.
 // Состояние блоков остаётся в PARSER. Незавершённые фрагменты получают P015.
 func (p *Parser) parseLine(source model.Line) (grammar.GrammarContext, error) {
@@ -91,6 +92,9 @@ func (p *Parser) parseLine(source model.Line) (grammar.GrammarContext, error) {
 			source.LineType = model.LineTypeBlank
 		}
 		context.SetLine(source)
+	}
+	if !textMode && p.rejectRepeatedVersion(context) {
+		return context, nil
 	}
 	if len(p.orchestrators) == 0 {
 		return nil, fmt.Errorf("версия %q: не задана оркестрация", p.version)
@@ -158,6 +162,44 @@ func (p *Parser) parseLine(source model.Line) (grammar.GrammarContext, error) {
 	}
 	context.SetLine(line)
 	return context, nil
+}
+
+// rejectRepeatedVersion отклоняет повтор уже принятого объявления версии.
+// Проверяется только точное имя тега; хвост не разбирается даже при ошибках.
+// Вызывается вне текстового режима и не меняет первую версию или стеки.
+func (p *Parser) rejectRepeatedVersion(context grammar.GrammarContext) bool {
+	line := context.Line()
+	first, seen := p.seenMetadata["@dsl-version"]
+	if !seen || line.Number <= first {
+		return false
+	}
+	raw := strings.Trim(line.Raw, " \t")
+	nameEnd := strings.IndexAny(raw, " \t{}\"")
+	if nameEnd < 0 {
+		nameEnd = len(raw)
+	}
+	// Как в GR12, пробел, TAB, скобки и кавычка ограничивают имя.
+	// Экранированная граница оставляет в имени обратную косую черту,
+	// поэтому такая запись не совпадёт с точным именем @dsl-version.
+	if strings.ToLower(raw[:nameEnd]) != "@dsl-version" {
+		return false
+	}
+	start := utf8.RuneCountInString(line.Raw) - utf8.RuneCountInString(strings.TrimLeft(line.Raw, " \t")) + 1
+	end := start + utf8.RuneCountInString(raw)
+	line.LineType = model.LineTypeInvalid
+	line.Elements = []model.Element{{
+		ElementType: model.ElementTypeUnparsed, Raw: raw, Value: nil,
+		Start: start, End: end, ErrorIDs: []string{},
+	}}
+	context.SetLine(line)
+	context.AddDiagnostic(model.Diagnostic{
+		DiagnosticCode: diagnostics.P003,
+		Location: &model.Location{
+			Start: model.Position{Line: line.Number, Column: start},
+			End:   model.Position{Line: line.Number, Column: end},
+		},
+	})
+	return true
 }
 
 // appendLine сохраняет готовую строку с исходными Number, Raw и EOL.

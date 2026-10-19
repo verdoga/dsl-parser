@@ -9,6 +9,8 @@ import (
 
 // parseMedia выделяет TYPE и SOURCE; SOURCE может быть отдельным токеном
 // либо путём в кавычках. Файлы и допустимость пути не проверяются.
+// TYPE допускает только audio, video и image без учёта регистра.
+// Ошибочный TYPE получает unparsed и P006; разбор SOURCE продолжается.
 // Элемент тега уже должен находиться в контексте.
 func parseMedia(context grammar.GrammarContext) {
 	if context == nil {
@@ -30,12 +32,13 @@ func parseMedia(context grammar.GrammarContext) {
 	}
 	checkSeparator(context, column)
 	canonical := strings.ToLower(mediaType.Raw)
-	mediaType.Value = nil
 	switch canonical {
 	case "audio", "video", "image":
 		mediaType.Value = &canonical
+		context.AddElement(mediaType)
+	default:
+		addInvalidOperand(context, mediaType.Start, mediaType.End)
 	}
-	context.AddElement(mediaType)
 	source := []rune(context.String())
 	column = next
 	for next <= len(source) && (source[next-1] == ' ' || source[next-1] == '\t') {

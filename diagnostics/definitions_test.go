@@ -31,8 +31,8 @@ func TestBuiltinDiagnosticsProvidesCompleteDescriptions(t *testing.T) {
 			scope: ScopeLine,
 		},
 		{
-			code: P006, message: "Отсутствует обязательный структурный параметр",
-			scope: ScopeLine,
+			code: P006, message: "Отсутствует или недопустим обязательный структурный параметр",
+			scope: ScopeElement, fatal: false, hasCheck: false,
 		},
 		{
 			code: P007, message: "Лишние параметры или запрещённое содержимое объявления",

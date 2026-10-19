@@ -41,8 +41,8 @@ func builtinDiagnostics() []diagnostic {
 		{
 			code:     P006,
 			severity: SeverityError,
-			message:  "Отсутствует обязательный структурный параметр",
-			scope:    ScopeLine,
+			message:  "Отсутствует или недопустим обязательный структурный параметр",
+			scope:    ScopeElement,
 		},
 		{
 			code:     P007,

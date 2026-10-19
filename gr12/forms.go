@@ -42,6 +42,7 @@ func parseBareTag(context grammar.GrammarContext) {
 
 // parseTokenTag разбирает отдельный обязательный операнд у dsl-version,
 // document-id, order, task и include; kind задаёт тип элемента.
+// У number допустима только запись положительного целого ASCII-цифрами.
 func parseTokenTag(context grammar.GrammarContext, kind model.ElementType) {
 	if context == nil {
 		return
@@ -64,7 +65,11 @@ func parseTokenTag(context grammar.GrammarContext, kind model.ElementType) {
 	checkRequiredOperand(context, present, next)
 	if present {
 		checkSeparator(context, tag.End)
-		context.AddElement(operand)
+		if kind == model.ElementTypeNumber && !isPositiveDecimal(operand.Raw) {
+			addInvalidOperand(context, operand.Start, operand.End)
+		} else {
+			context.AddElement(operand)
+		}
 	}
 	start := next - 1
 	for start < len(source) && (source[start] == ' ' || source[start] == '\t') {
@@ -80,6 +85,21 @@ func parseTokenTag(context grammar.GrammarContext, kind model.ElementType) {
 		return
 	}
 	checkTagTail(context, next)
+}
+
+// isPositiveDecimal проверяет непустую запись ASCII-цифрами с ненулевым значением.
+// Ведущие нули допустимы; преобразование в число и ограничение длины не нужны.
+func isPositiveDecimal(raw string) bool {
+	nonzero := false
+	for _, digit := range raw {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+		if digit != '0' {
+			nonzero = true
+		}
+	}
+	return nonzero
 }
 
 // parseFreeTag разбирает свободное значение section, header, step, question

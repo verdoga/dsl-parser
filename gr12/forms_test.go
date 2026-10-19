@@ -109,14 +109,14 @@ func TestFormRegressionsPreserveStructureAndNeighbours(t *testing.T) {
 		{"choice", "@choice Choose one.", false, []formPart{{model.ElementTypeContent, "Choose one.", 9}}, []formDiagnostic{{diagnostics.P005, 1, 20}}},
 		{"fragment", "@fragment part", false, []formPart{{model.ElementTypeIdentifier, "part", 11}}, []formDiagnostic{{diagnostics.P005, 1, 15}}},
 		{"variants", "@variants", false, nil, []formDiagnostic{{diagnostics.P005, 1, 10}}},
-		{"fragment", "@fragment {", true, []formPart{{model.ElementTypeBlockOpen, "{", 11}}, []formDiagnostic{{diagnostics.P006, 11, 11}}},
-		{"fragment", "@fragment", false, nil, []formDiagnostic{{diagnostics.P006, 10, 10}, {diagnostics.P005, 1, 10}}},
+		{"fragment", "@fragment {", true, []formPart{{model.ElementTypeUnparsed, "", 11}, {model.ElementTypeBlockOpen, "{", 11}}, []formDiagnostic{{diagnostics.P006, 11, 11}}},
+		{"fragment", "@fragment", false, []formPart{{model.ElementTypeUnparsed, "", 10}}, []formDiagnostic{{diagnostics.P006, 10, 10}, {diagnostics.P005, 1, 10}}},
 		{"fragment", "@fragment Part{tail", true, []formPart{{model.ElementTypeIdentifier, "Part", 11}, {model.ElementTypeBlockOpen, "{", 15}}, []formDiagnostic{{diagnostics.P004, 15, 16}, {diagnostics.P008, 15, 20}}},
 		{"fragment", "@fragment part extra { x", true, []formPart{{model.ElementTypeIdentifier, "part", 11}, {model.ElementTypeBlockOpen, "{", 22}}, []formDiagnostic{{diagnostics.P007, 16, 21}, {diagnostics.P008, 22, 25}}},
 		{"endtask", "@endtask task-1", false, nil, []formDiagnostic{{diagnostics.P007, 10, 16}}},
 		{"endtask", "@endtask {", false, nil, []formDiagnostic{{diagnostics.P005, 1, 11}}},
 		{"include", "@include part extra", false, []formPart{{model.ElementTypeIdentifier, "part", 10}}, []formDiagnostic{{diagnostics.P007, 15, 20}}},
-		{"task", "@task", false, nil, []formDiagnostic{{diagnostics.P006, 6, 6}}},
+		{"task", "@task", false, []formPart{{model.ElementTypeUnparsed, "", 6}}, []formDiagnostic{{diagnostics.P006, 6, 6}}},
 		// Уточнение пользователя: первая неэкранированная { открывает эти семейства.
 		{"note", "@note Text {x}", true, []formPart{{model.ElementTypeTitle, "Text", 7}, {model.ElementTypeBlockOpen, "{", 12}}, []formDiagnostic{{diagnostics.P008, 12, 15}}},
 		{"multifill", "@multifill Text {x}", true, []formPart{{model.ElementTypeContent, "Text", 12}, {model.ElementTypeBlockOpen, "{", 17}}, []formDiagnostic{{diagnostics.P008, 17, 20}}},
@@ -153,6 +153,45 @@ func TestFormValuesKeepUnicodeWhitespaceAndEscaping(t *testing.T) {
 	} {
 		t.Run(test.source, func(t *testing.T) {
 			assertForm(t, test.tag, test.source, false, []formPart{{test.kind, test.raw, test.start}}, nil)
+		})
+	}
+}
+
+func TestOrderRejectsInvalidNumbers(t *testing.T) {
+	for _, raw := range []string{
+		"garbage", "vidio", "0", "000", "-1", "-10", "1.5", "NaN", "10abc",
+		"+1", "+", "-", "−1", "1e3", "0x10", "0b10", "0o10", "1_000", "1,5",
+		"１２", "١٠", "1２", `10\{x\}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			assertForm(t, "order", "@order "+raw, false,
+				[]formPart{{model.ElementTypeUnparsed, raw, 8}},
+				[]formDiagnostic{{diagnostics.P006, 8, 8 + utf8.RuneCountInString(raw)}})
+		})
+	}
+	for _, test := range []struct{ name, raw string }{
+		{"long zero", strings.Repeat("0", 4096)},
+		{"invalid final digit", strings.Repeat("1", 4096) + "x"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			assertForm(t, "order", "@order "+test.raw, false,
+				[]formPart{{model.ElementTypeUnparsed, test.raw, 8}},
+				[]formDiagnostic{{diagnostics.P006, 8, 8 + len(test.raw)}})
+		})
+	}
+}
+
+func TestOrderPreservesPositiveNumbersWithoutMachineLimit(t *testing.T) {
+	for _, test := range []struct{ name, raw string }{
+		{"one", "1"},
+		{"leading zeros", "0010"},
+		{"long production mutation", "999999999999999999999999999999999999999999"},
+		{"long number", strings.Repeat("1234567890", 410)},
+		{"nonzero after long zero prefix", strings.Repeat("0", 4096) + "1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			assertForm(t, "order", "@order "+test.raw, false,
+				[]formPart{{model.ElementTypeNumber, test.raw, 8}}, nil)
 		})
 	}
 }
@@ -221,14 +260,16 @@ func TestFormFamiliesWithoutArgumentsOrPreparedTag(t *testing.T) {
 		for _, tag := range strings.Fields(family.tags) {
 			t.Run(tag, func(t *testing.T) {
 				var errors []formDiagnostic
+				var parts []formPart
 				for _, code := range family.codes {
 					start, end := 1, len(tag)+2
 					if code == diagnostics.P006 {
 						start = end
+						parts = append(parts, formPart{model.ElementTypeUnparsed, "", start})
 					}
 					errors = append(errors, formDiagnostic{code, start, end})
 				}
-				assertForm(t, tag, "@"+tag, false, nil, errors)
+				assertForm(t, tag, "@"+tag, false, parts, errors)
 				parseFormForTest(t, nil, tag)
 				context := grammar.NewContext("@" + tag)
 				parseFormForTest(t, context, tag)
@@ -247,6 +288,10 @@ func TestUnsupportedFormsKeepSeparatorDiagnostics(t *testing.T) {
 		case "dsl-version", "document-id", "order", "task", "include":
 			operands = []string{"", " value"}
 		}
+		requiresOperand := len(operands) > 1
+		if tag == "order" {
+			operands = append(operands, " 0010")
+		}
 		for _, operand := range operands {
 			for _, separator := range []string{"", "\t", " "} {
 				source := "@" + tag + operand + separator + "{"
@@ -256,7 +301,8 @@ func TestUnsupportedFormsKeepSeparatorDiagnostics(t *testing.T) {
 						t.Fatal("Не завершён разбор ошибочной формы")
 					}
 					wantCodes := []diagnostics.Code{}
-					if len(operands) == 2 && operand == "" {
+					invalidOperand := requiresOperand && operand == "" || tag == "order" && operand == " value"
+					if invalidOperand {
 						wantCodes = append(wantCodes, diagnostics.P006)
 					}
 					if separator != " " {
@@ -276,11 +322,26 @@ func TestUnsupportedFormsKeepSeparatorDiagnostics(t *testing.T) {
 						}
 					}
 					wantElements := 1
-					if operand != "" {
+					if requiresOperand {
 						wantElements++
 					}
 					if context.Line().LineType != model.LineTypeTag || len(context.Line().Elements) != wantElements || increasesNesting(grammar.AssertionInput{Line: context.Line()}) {
 						t.Fatal("Запрещённая форма изменила элементы или открыла уровень")
+					}
+					if invalidOperand {
+						raw, start := "", len(source)
+						if operand != "" {
+							raw, start = "value", len(tag)+3
+						}
+						end := start + len(raw)
+						assertOperandElement(t, context.Line().Elements[1], model.Element{ElementType: model.ElementTypeUnparsed, Raw: raw, Value: nil, Start: start, End: end, ErrorIDs: []string{}})
+						location := model.Location{Start: model.Position{Line: 19, Column: start}, End: model.Position{Line: 19, Column: end}}
+						if d := got[0]; d.DiagnosticScope != diagnostics.ScopeElement || d.Location == nil || *d.Location != location || d.Fatal || d.SeverityLevel != diagnostics.SeverityError {
+							t.Fatalf("Неверная P006: %+v, требуется диапазон %+v", d, location)
+						}
+					}
+					if tag == "order" && operand == " 0010" {
+						assertOperandElement(t, context.Line().Elements[1], operandWant(model.ElementTypeNumber, "0010", "0010", 8))
 					}
 				})
 			}
@@ -288,7 +349,7 @@ func TestUnsupportedFormsKeepSeparatorDiagnostics(t *testing.T) {
 	}
 }
 
-// formPart описывает ожидаемый фрагмент; значение в этих формах совпадает с raw.
+// formPart описывает ожидаемый фрагмент; значение совпадает с raw, кроме unparsed (nil).
 type formPart struct {
 	kind  model.ElementType
 	raw   string
@@ -323,7 +384,11 @@ func assertForm(t *testing.T, tag, source string, block bool, parts []formPart, 
 	}
 	assertOperandElement(t, got.Elements[0], tagElement)
 	for i, part := range parts {
-		assertOperandElement(t, got.Elements[i+1], operandWant(part.kind, part.raw, part.raw, part.start))
+		want := operandWant(part.kind, part.raw, part.raw, part.start)
+		if part.kind == model.ElementTypeUnparsed {
+			want.Value = nil
+		}
+		assertOperandElement(t, got.Elements[i+1], want)
 	}
 	actualDiagnostics := context.Diagnostics()
 	if len(actualDiagnostics) != len(expectedDiagnostics) {
@@ -335,6 +400,20 @@ func assertForm(t *testing.T, tag, source string, block bool, parts []formPart, 
 		location := model.Location{Start: model.Position{Line: 19, Column: expected.start}, End: model.Position{Line: 19, Column: expected.end}}
 		if d.DiagnosticCode != expected.code || d.DiagnosticScope != description.Scope() || d.Location == nil || *d.Location != location || d.ID != "" || d.Source != "" {
 			t.Errorf("Диагностика %+v в %+v, требуется %+v", d, d.Location, expected)
+		}
+		if expected.code == diagnostics.P006 {
+			if d.DiagnosticScope != diagnostics.ScopeElement || d.Fatal || d.SeverityLevel != diagnostics.SeverityError {
+				t.Errorf("P006 должна быть нефатальной ошибкой элемента: %+v", d)
+			}
+			matches := 0
+			for _, element := range got.Elements {
+				if element.ElementType == model.ElementTypeUnparsed && element.Start == expected.start && element.End == expected.end && element.Value == nil {
+					matches++
+				}
+			}
+			if matches != 1 {
+				t.Errorf("Для P006 в %+v требуется ровно один unparsed, найдено %d", location, matches)
+			}
 		}
 	}
 }

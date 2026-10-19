@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/verdoga/dsl-parser/diagnostics"
 	"github.com/verdoga/dsl-parser/grammar"
 	"github.com/verdoga/dsl-parser/model"
 )
@@ -48,6 +49,7 @@ func classifyLine(context grammar.GrammarContext) bool {
 
 // parseLine направляет строку к разбору её частей без учёта других строк.
 // true означает завершённый разбор, false — невозможность его закончить.
+// Ошибочный заголовок получает unparsed и P003 как завершённый разбор.
 // У invalid без согласованной диагностики разбор остаётся частичным:
 // исходник сохраняется, но искусственный unparsed без ошибки не создаётся.
 // У media и resource-dir невыделенный операнд не считается завершённым
@@ -70,7 +72,10 @@ func parseLine(context grammar.GrammarContext) bool {
 		}
 		switch *elements[0].Value {
 		case "media":
-			if len(elements) == 2 && elements[1].ElementType == model.ElementTypeMediaType {
+			// Непустой TYPE может быть корректным или уже получить P006.
+			// Пустой unparsed означает отсутствие TYPE, а не начало SOURCE.
+			if len(elements) == 2 && elements[1].Start < elements[1].End &&
+				(elements[1].ElementType == model.ElementTypeMediaType || elements[1].ElementType == model.ElementTypeUnparsed) {
 				source := []rune(context.String())
 				tail := strings.TrimLeft(string(source[elements[1].End-1:]), " \t")
 				// При начальной кавычке SOURCE отсутствует только тогда,
@@ -102,15 +107,28 @@ func parseLine(context grammar.GrammarContext) bool {
 		parseClosing(context)
 	case model.LineTypeInvalid:
 		source := []rune(context.String())
-		if strings.Trim(string(source), " \t") != "{" {
-			return false
-		}
-		start := 0
-		for source[start] == ' ' || source[start] == '\t' {
+		start, end := 0, len(source)
+		for start < end && (source[start] == ' ' || source[start] == '\t') {
 			start++
 		}
-		addElement(context, model.ElementTypeUnparsed, start+1, start+2, nil)
-		checkOpeningTail(context, start+1)
+		for end > start && (source[end-1] == ' ' || source[end-1] == '\t') {
+			end--
+		}
+		switch {
+		case start == end:
+			return false
+		case source[start] == '#':
+			addElement(context, model.ElementTypeUnparsed, start+1, end+1, nil)
+			addSyntaxDiagnostic(context, diagnostics.P003, model.Location{
+				Start: model.Position{Line: line.Number, Column: start + 1},
+				End:   model.Position{Line: line.Number, Column: end + 1},
+			})
+		case end-start == 1 && source[start] == '{':
+			addElement(context, model.ElementTypeUnparsed, start+1, start+2, nil)
+			checkOpeningTail(context, start+1)
+		default:
+			return false
+		}
 	default:
 		return false
 	}
