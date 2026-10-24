@@ -39,15 +39,19 @@ func TestRunStopsForHelpUsageAndEmptyVersion(t *testing.T) {
 			if code != test.code {
 				t.Fatalf("Код %d, требуется %d: %q, %q", code, test.code, stdout, stderr)
 			}
+			banner := ""
+			if test.version != "" {
+				banner = "dsl-parser v" + test.version + "\n"
+			}
 			switch test.code {
 			case 0:
-				if stdout != help.String() || stderr != "" {
+				if stdout != banner+help.String() || stderr != "" {
 					t.Fatalf("Неверный вывод справки: %q, %q", stdout, stderr)
 				}
 			case 2:
 				var wantOut, wantErr bytes.Buffer
 				console.Parse(test.args, &wantOut, &wantErr)
-				if stdout != wantOut.String() || stderr != wantErr.String() || strings.Count(stderr, "\n") != 1 {
+				if stdout != banner+wantOut.String() || stderr != wantErr.String() || strings.Count(stderr, "\n") != 1 {
 					t.Fatalf("Ошибка console изменена или напечатана повторно: %q, %q", stdout, stderr)
 				}
 			case 1:
@@ -84,21 +88,22 @@ func TestRunReturnsUsageWhenHelpCannotBeWritten(t *testing.T) {
 func TestRunProcessesSelectedFilesAndReportsOutcomes(t *testing.T) {
 	valid := "@dsl-version 1.2\nText"
 	for _, test := range []struct {
-		name, source string
-		files        map[string]string
-		flags        []string
-		selected     []string
-		statuses     []string
-		existing     bool
+		name, source                                         string
+		files                                                map[string]string
+		flags                                                []string
+		selected                                             []string
+		statuses                                             []string
+		existing                                             bool
+		technicalFailures, filesWithParseErrors, parseErrors int
 	}{
 		{name: "empty directory"},
 		{name: "single file ignores depth", source: "a.txt", files: map[string]string{"a.txt": valid}, flags: []string{"--depth", "0"}, selected: []string{"a.txt"}, statuses: []string{"УСПЕХ: СОЗДАН"}},
 		{name: "sorted recursive selection", files: map[string]string{"z.txt": valid, "a.TXT": valid, "sub/b.txt": valid, "ignored.md": valid}, selected: []string{"a.TXT", "sub/b.txt", "z.txt"}, statuses: []string{"УСПЕХ: СОЗДАН", "УСПЕХ: СОЗДАН", "УСПЕХ: СОЗДАН"}},
 		{name: "depth zero", files: map[string]string{"a.txt": valid, "sub/b.txt": valid}, flags: []string{"--depth", "0"}, selected: []string{"a.txt"}, statuses: []string{"УСПЕХ: СОЗДАН"}},
 		{name: "depth one", files: map[string]string{"a.txt": valid, "sub/b.txt": valid, "sub/deep/c.txt": valid}, flags: []string{"--depth", "1"}, selected: []string{"a.txt", "sub/b.txt"}, statuses: []string{"УСПЕХ: СОЗДАН", "УСПЕХ: СОЗДАН"}},
-		{name: "nonfatal errors still succeed", files: map[string]string{"a.txt": "@dsl-version 1.2\n@unknown"}, selected: []string{"a.txt"}, statuses: []string{"УСПЕХ: СОЗДАН"}},
-		{name: "continue after fatal error", files: map[string]string{"a.txt": "", "z.txt": valid}, selected: []string{"a.txt", "z.txt"}, statuses: []string{"ОШИБКА: НЕ СОЗДАН", "УСПЕХ: СОЗДАН"}},
-		{name: "replacement denied", files: map[string]string{"a.txt": valid}, existing: true, selected: []string{"a.txt"}, statuses: []string{"ОШИБКА: НЕ СОЗДАН"}},
+		{name: "nonfatal errors still succeed", files: map[string]string{"a.txt": "@dsl-version 1.2\n@unknown"}, selected: []string{"a.txt"}, statuses: []string{"УСПЕХ: СОЗДАН"}, filesWithParseErrors: 1, parseErrors: 1},
+		{name: "continue after fatal error", files: map[string]string{"a.txt": "", "z.txt": valid}, selected: []string{"a.txt", "z.txt"}, statuses: []string{"ОШИБКА: НЕ СОЗДАН", "УСПЕХ: СОЗДАН"}, filesWithParseErrors: 1, parseErrors: 1},
+		{name: "replacement denied", files: map[string]string{"a.txt": valid}, existing: true, selected: []string{"a.txt"}, statuses: []string{"ОШИБКА: НЕ СОЗДАН"}, technicalFailures: 1},
 		{name: "replacement allowed", files: map[string]string{"a.txt": valid}, existing: true, flags: []string{"--replace"}, selected: []string{"a.txt"}, statuses: []string{"УСПЕХ: ЗАМЕНЁН"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -112,9 +117,11 @@ func TestRunProcessesSelectedFilesAndReportsOutcomes(t *testing.T) {
 			args := append(append([]string{}, test.flags...), filepath.Join(root, test.source))
 			code, stdout, stderr := captureRunOutput(t, func() int { return Run(args, "build-test") })
 			lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
-			if stderr != "" || len(lines) != len(test.selected)+1 {
+			if stderr != "" || len(lines) != len(test.selected)+2 || lines[0] != "dsl-parser vbuild-test" {
 				t.Fatalf("Неверное число отчётов или лишний stderr: %q, %q", stdout, stderr)
 			}
+			banner := lines[0]
+			lines = lines[1:]
 			written := make(map[string]bool)
 			failures := 0
 			for i, name := range test.selected {
@@ -131,7 +138,8 @@ func TestRunProcessesSelectedFilesAndReportsOutcomes(t *testing.T) {
 			if failures != 0 {
 				wantCode = 1
 			}
-			wantTotal := fmt.Sprintf("ИТОГО | всего: %d | успех: %d | ошибка: %d", len(test.selected), len(written), failures)
+			wantTotal := fmt.Sprintf("ИТОГО | всего: %d | сохранено: %d | сбоев: %d | файлов с ошибками разбора: %d | ошибок разбора: %d",
+				len(test.selected), len(written), test.technicalFailures, test.filesWithParseErrors, test.parseErrors)
 			if code != wantCode || lines[len(lines)-1] != wantTotal {
 				t.Fatalf("Неверный итог: код %d, %q; требуется %d, %q", code, stdout, wantCode, wantTotal)
 			}
@@ -157,6 +165,9 @@ func TestRunProcessesSelectedFilesAndReportsOutcomes(t *testing.T) {
 				}
 				if len(result.Processing) != 1 || result.Processing[0].Version == nil || *result.Processing[0].Version != "build-test" || result.Document.HasErrors != (source != valid) {
 					t.Fatalf("Версия инструмента или ошибки DSL потеряны: %+v", result)
+				}
+				if banner != fmt.Sprintf("%s v%s", result.Processing[0].Tool, *result.Processing[0].Version) {
+					t.Fatalf("Заголовок %q не совпадает с processing: %+v", banner, result.Processing[0])
 				}
 			}
 		})
@@ -184,8 +195,8 @@ func TestRunPreservesPartialDiscoveryResultsAndFailsOnWalkError(t *testing.T) {
 				writeRunSource(t, root, fmt.Sprintf("file%d.txt", i), "@dsl-version 1.2")
 			}
 			code, stdout, stderr := captureRunOutput(t, func() int { return Run([]string{root}, "test") })
-			wantTotal := fmt.Sprintf("ИТОГО | всего: %d | успех: %d | ошибка: 0\n", count, count)
-			if code != 1 || !strings.Contains(stderr, denied) || strings.Count(stderr, "\n") != 1 || !strings.HasSuffix(stdout, wantTotal) || strings.Count(stdout, "\n") != count+1 {
+			wantTotal := fmt.Sprintf("ИТОГО | всего: %d | сохранено: %d | сбоев: 0 | файлов с ошибками разбора: 0 | ошибок разбора: 0\n", count, count)
+			if code != 1 || !strings.Contains(stderr, denied) || strings.Count(stderr, "\n") != 1 || !strings.HasSuffix(stdout, wantTotal) || strings.Count(stdout, "\n") != count+2 {
 				t.Fatalf("Ошибка обхода или частичный результат потеряны: код %d, %q, %q", code, stdout, stderr)
 			}
 			for i := 0; i < count; i++ {
@@ -194,6 +205,84 @@ func TestRunPreservesPartialDiscoveryResultsAndFailsOnWalkError(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunReportsBatchCountsAndDurations(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		count        int
+		errorsByFile map[int]int
+		wantTotal    string
+	}{
+		{"provided example", 14, map[int]int{0: 1, 6: 1}, "ИТОГО | всего: 14 | сохранено: 14 | сбоев: 0 | файлов с ошибками разбора: 2 | ошибок разбора: 2"},
+		{"large queue", 120, map[int]int{1: 2, 61: 1, 119: 1}, "ИТОГО | всего: 120 | сохранено: 120 | сбоев: 0 | файлов с ошибками разбора: 3 | ошибок разбора: 4"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			for i := 0; i < test.count; i++ {
+				source := "@dsl-version 1.2\n" + strings.Repeat("Example text.\n", 259-test.errorsByFile[i]) + strings.Repeat("@unknown\n", test.errorsByFile[i])
+				writeRunSource(t, root, fmt.Sprintf("%03d.txt", i), source)
+			}
+			code, stdout, stderr := captureRunOutput(t, func() int { return Run([]string{root}, "1.0.3") })
+			lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
+			if code != 0 || stderr != "" || len(lines) != test.count+2 || lines[0] != "dsl-parser v1.0.3" || lines[len(lines)-1] != test.wantTotal {
+				t.Fatalf("Неверный пакетный отчёт: код %d, stdout=%q, stderr=%q", code, stdout, stderr)
+			}
+			for i := 0; i < test.count; i++ {
+				path := filepath.Join(root, fmt.Sprintf("%03d.txt", i))
+				wantLine := fmt.Sprintf("УСПЕХ: СОЗДАН | путь: %q | строк: 260 | ошибок: %d", path, test.errorsByFile[i])
+				if lines[i+1] != wantLine {
+					t.Fatalf("Строка файла %d: %q, требуется %q", i, lines[i+1], wantLine)
+				}
+				payload, err := os.ReadFile(filepath.Join(root, fmt.Sprintf("%03d.json", i)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var result model.Result
+				if err := json.Unmarshal(payload, &result); err != nil {
+					t.Fatal(err)
+				}
+				if len(result.Processing) != 1 || len(result.Diagnostics) != test.errorsByFile[i] || result.Document.HasErrors != (test.errorsByFile[i] > 0) {
+					t.Fatalf("Файл %d унаследовал чужие ошибки или обработку: %+v", i, result)
+				}
+				processing := result.Processing[0]
+				if processing.Version == nil || lines[0] != fmt.Sprintf("%s v%s", processing.Tool, *processing.Version) || processing.DurationMs == nil || *processing.DurationMs < 1 {
+					t.Fatalf("Файл %d: неверные версия или длительность: %+v", i, processing)
+				}
+			}
+		})
+	}
+}
+
+func TestRunCountsSimultaneousParseAndSaveFailures(t *testing.T) {
+	root := t.TempDir()
+	for _, file := range []struct {
+		name, source string
+	}{
+		{"001-valid", "@dsl-version 1.2\nText"},
+		{"002-nonfatal", "@dsl-version 1.2\n@unknown\n@unknown"},
+		{"003-fatal", "Text"},
+		{"004-denied", "@dsl-version 1.2\nText"},
+		{"005-nonfatal-denied", "@dsl-version 1.2\n@unknown"},
+		{"006-fatal-denied", "Text"},
+	} {
+		writeRunSource(t, root, file.name+".txt", file.source)
+	}
+	for _, name := range []string{"004-denied", "005-nonfatal-denied", "006-fatal-denied"} {
+		writeRunSource(t, root, name+".json", "previous JSON")
+	}
+	code, stdout, stderr := captureRunOutput(t, func() int { return Run([]string{root}, "1.0.3") })
+	lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
+	wantTotal := "ИТОГО | всего: 6 | сохранено: 2 | сбоев: 3 | файлов с ошибками разбора: 4 | ошибок разбора: 5"
+	if code != 1 || stderr != "" || len(lines) != 8 || lines[0] != "dsl-parser v1.0.3" || lines[len(lines)-1] != wantTotal || strings.Count(stdout, "фатальная ошибка: P013") != 2 {
+		t.Fatalf("Неверный смешанный отчёт: код %d, stdout=%q, stderr=%q", code, stdout, stderr)
+	}
+	for _, name := range []string{"004-denied", "005-nonfatal-denied", "006-fatal-denied"} {
+		payload, err := os.ReadFile(filepath.Join(root, name+".json"))
+		if err != nil || string(payload) != "previous JSON" {
+			t.Fatalf("JSON %s изменён при отказе: %q, %v", name, payload, err)
+		}
 	}
 }
 

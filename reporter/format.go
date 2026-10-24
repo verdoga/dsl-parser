@@ -55,6 +55,7 @@ func formatFileLine(summary fileSummary) string {
 
 // formatTotalLine формирует итоговую строку по формату комментария к пакету;
 // не обновляет счётчики и не печатает.
-func formatTotalLine(total int, success int, failed int) string {
-	return fmt.Sprintf("ИТОГО | всего: %d | успех: %d | ошибка: %d", total, success, failed)
+func formatTotalLine(total, saved, technicalFailures, filesWithParseErrors, parseErrors int) string {
+	return fmt.Sprintf("ИТОГО | всего: %d | сохранено: %d | сбоев: %d | файлов с ошибками разбора: %d | ошибок разбора: %d",
+		total, saved, technicalFailures, filesWithParseErrors, parseErrors)
 }

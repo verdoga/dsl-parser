@@ -1,7 +1,8 @@
 // Package reporter печатает результат обработки каждого TXT и накапливает
 // статистику запуска. Фактическое действие, число ошибок и причину сбоя он
 // получает из storage.Report; model.Result нужен для числа строк и кода
-// ранней фатальной диагностики. Пакет не разбирает DSL и не записывает JSON.
+// ранней фатальной диагностики, а также для подсчёта ошибок текущего разбора
+// отдельно от IO001. Пакет не разбирает DSL и не записывает JSON.
 //
 // Форматы одной строки для успешно сохранённого файла:
 // УСПЕХ: СОЗДАН | путь: "<абсолютный путь>" | строк: <N или нет данных> | ошибок: <N>
@@ -20,9 +21,11 @@
 // заключается в кавычки с экранированием по правилам Go для %q.
 //
 // Формат единственной итоговой строки после всех Record:
-// ИТОГО | всего: <N> | успех: <N> | ошибка: <N>
-// Всего равно сумме успеха и ошибки. Если Record не вызывался, все три числа
-// равны нулю. Остальные слова консольного вывода — на русском языке.
+// ИТОГО | всего: <N> | сохранено: <N> | сбоев: <N> | файлов с ошибками разбора: <N> | ошибок разбора: <N>
+// Счётчики независимы: сохранение может сопровождаться ошибкой очистки,
+// а ошибки разбора — техническим отказом записи. Фатальная ошибка DSL сама
+// по себе не считается техническим сбоем. Если Record не вызывался, все числа
+// равны нулю. Предупреждения и рекомендации в итог не входят.
 package reporter
 
 import (
@@ -37,10 +40,16 @@ import (
 type Reporter struct {
 	// total — число полученных отчётов storage.
 	total int
-	// success — число отчётов об успешной записи.
-	success int
-	// failed — число отчётов об отказе или сбое записи.
+	// saved — число фактически созданных или заменённых JSON, включая сбой очистки.
+	saved int
+	// failed — число неуспешных исходов, включая фатальные диагностики, для exit code.
 	failed int
+	// technicalFailures — число файлов с техническим сбоем или отказом сохранения.
+	technicalFailures int
+	// filesWithParseErrors — число файлов с хотя бы одной ошибкой текущего разбора.
+	filesWithParseErrors int
+	// parseErrors — суммарное число ошибок текущего разбора без IO001.
+	parseErrors int
 }
 
 // New создаёт Reporter с нулевыми счётчиками и выводом в стандартную консоль.
@@ -59,9 +68,17 @@ func (r *Reporter) Record(result model.Result, report storage.Report) {
 	r.total++
 	if isFailure(summary) {
 		r.failed++
-	} else {
-		r.success++
 	}
+	if summary.action == storage.ActionCreated || summary.action == storage.ActionReplaced {
+		r.saved++
+	}
+	if summary.technicalFailure {
+		r.technicalFailures++
+	}
+	if summary.parseErrors > 0 {
+		r.filesWithParseErrors++
+	}
+	r.parseErrors += summary.parseErrors
 	fmt.Println(formatFileLine(summary))
 }
 
@@ -69,7 +86,7 @@ func (r *Reporter) Record(result model.Result, report storage.Report) {
 // иначе 1. Вызывается один раз после всех Record. Код 2 при ошибке
 // параметров запуска выбирает вызывающий код до обработки файлов.
 func (r *Reporter) Finish() int {
-	fmt.Println(formatTotalLine(r.total, r.success, r.failed))
+	fmt.Println(formatTotalLine(r.total, r.saved, r.technicalFailures, r.filesWithParseErrors, r.parseErrors))
 	if r.failed != 0 {
 		return 1
 	}

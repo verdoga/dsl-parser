@@ -19,7 +19,9 @@ import (
 // указывать на каталог. Сначала проверяет существование целевого JSON и
 // params.Replace, затем диагностики с Fatal=true. При запрете замены или
 // фатальной диагностике не создаёт и не заменяет JSON, возвращая причину в
-// Report.Err. Нефатальные диагностики не препятствуют записи.
+// Report.Err. Блокировка фатальными диагностиками помечается отдельным
+// FailureKind, чтобы reporter отличал её от технического отказа.
+// Нефатальные диагностики не препятствуют записи.
 // Ошибка сериализации или записи также помещается в Report.Err. Action
 // отражает факт установки нового JSON, включая последующую ошибку очистки.
 // Save не изменяет result и не печатает сообщения.
@@ -47,7 +49,9 @@ func Save(result *model.Result, params console.Params) Report {
 		}
 	}
 	if err := errors.Join(fatalErrors...); err != nil {
-		return NewReport(sourcePath, targetPath, ActionNotWritten, errorCount, err)
+		report := NewReport(sourcePath, targetPath, ActionNotWritten, errorCount, err)
+		report.FailureKind = FailureFatalDiagnostics
+		return report
 	}
 	payload, err := encode(result)
 	if err != nil {

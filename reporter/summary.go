@@ -14,6 +14,10 @@ type fileSummary struct {
 	lineCount *int
 	// errors — число диагностик уровня error из storage.Report.ErrorCount.
 	errors int
+	// parseErrors — число ошибок текущего разбора без технической IO001.
+	parseErrors int
+	// technicalFailure — сбой чтения/обработки либо технический отказ сохранения.
+	technicalFailure bool
 	// action — фактическое действие с JSON из storage.Report.Action.
 	action storage.Action
 	// failure — причина отказа или сбоя из storage.Report.Err.
@@ -23,7 +27,7 @@ type fileSummary struct {
 }
 
 // currentDiagnostics выбирает диагностики последней записи Processing,
-// чтобы не искать раннюю фатальную ошибку среди исторических запусков.
+// чтобы не учитывать ошибки исторических запусков.
 func currentDiagnostics(result model.Result) []model.Diagnostic {
 	if len(result.Processing) == 0 {
 		return nil
@@ -65,7 +69,19 @@ func summarizeFile(result model.Result, report storage.Report) fileSummary {
 		action:    report.Action,
 		failure:   report.Err,
 	}
-	if fatal := earlyFatal(currentDiagnostics(result)); fatal != nil {
+	summary.technicalFailure = isFailure(summary) && report.FailureKind != storage.FailureFatalDiagnostics
+	entries := currentDiagnostics(result)
+	for _, entry := range entries {
+		if entry.SeverityLevel != diagnostics.SeverityError {
+			continue
+		}
+		if entry.DiagnosticCode == diagnostics.IO001 {
+			summary.technicalFailure = true
+		} else {
+			summary.parseErrors++
+		}
+	}
+	if fatal := earlyFatal(entries); fatal != nil {
 		summary.lineCount = nil
 		// Выборка содержит копии; сохраняем указатель на исходную запись модели.
 		for i := range result.Diagnostics {

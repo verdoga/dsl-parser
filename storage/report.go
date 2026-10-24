@@ -18,6 +18,17 @@ const (
 	ActionReplaced Action = "replaced"
 )
 
+// FailureKind различает технический отказ и блокировку фатальными диагностиками.
+type FailureKind string
+
+const (
+	// FailureTechnical — технический сбой либо отказ сохранения, включая запрет замены.
+	FailureTechnical FailureKind = "technical"
+
+	// FailureFatalDiagnostics — запись запрещена фатальными диагностиками модели.
+	FailureFatalDiagnostics FailureKind = "fatal-diagnostics"
+)
+
 // Report — результат одной попытки записи, полностью передаваемый reporter.
 // Err равен nil только при успешном завершении операции.
 type Report struct {
@@ -34,6 +45,10 @@ type Report struct {
 	// ErrorCount — число диагностик с severity="error" в переданной модели.
 	ErrorCount int
 
+	// FailureKind — вид отказа; пустое значение означает отсутствие отказа.
+	// Поле внутреннее и не записывается в JSON.
+	FailureKind FailureKind `json:"-"`
+
 	// Err — причина отказа или сбоя записи; при фатальных диагностиках содержит
 	// их коды и сообщения в порядке модели. Поле не записывается в JSON.
 	Err error `json:"-"`
@@ -41,12 +56,18 @@ type Report struct {
 
 // NewReport создаёт отчёт без обращения к файловой системе.
 // Значения action и err отражают фактический итог попытки записи.
+// Отказ по умолчанию технический; Save отдельно помечает фатальные диагностики.
 func NewReport(sourcePath, targetPath string, action Action, errorCount int, err error) Report {
+	var failureKind FailureKind
+	if err != nil || action == ActionNotWritten {
+		failureKind = FailureTechnical
+	}
 	return Report{
-		SourcePath: sourcePath,
-		TargetPath: targetPath,
-		Action:     action,
-		ErrorCount: errorCount,
-		Err:        err,
+		SourcePath:  sourcePath,
+		TargetPath:  targetPath,
+		Action:      action,
+		ErrorCount:  errorCount,
+		FailureKind: failureKind,
+		Err:         err,
 	}
 }
