@@ -215,7 +215,7 @@ func TestSummaryFailureDependsOnlyOnStorageOutcome(t *testing.T) {
 	}
 }
 
-func TestSummarizeFileSeparatesCurrentParseErrorsAndTechnicalFailures(t *testing.T) {
+func TestSummarizeFileSeparatesCurrentParseErrorsAndFailures(t *testing.T) {
 	parseError := model.Diagnostic{Source: "current", DiagnosticCode: diagnostics.P003, SeverityLevel: diagnostics.SeverityError}
 	fatalError := model.Diagnostic{ID: "fatal", Source: "current", DiagnosticCode: diagnostics.P013, SeverityLevel: diagnostics.SeverityError, Fatal: true}
 	readError := model.Diagnostic{ID: "io", Source: "current", DiagnosticCode: diagnostics.IO001, SeverityLevel: diagnostics.SeverityError, Fatal: true}
@@ -225,29 +225,45 @@ func TestSummarizeFileSeparatesCurrentParseErrorsAndTechnicalFailures(t *testing
 		entries     []model.Diagnostic
 		report      storage.Report
 		parseErrors int
-		technical   bool
+		failed      bool
 	}{
 		{name: "saved with multiple parse errors", entries: []model.Diagnostic{parseError, parseError}, report: storage.Report{Action: storage.ActionCreated, ErrorCount: 17}, parseErrors: 2},
-		{name: "fatal DSL", entries: []model.Diagnostic{fatalError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, parseErrors: 1},
-		{name: "IO001", entries: []model.Diagnostic{readError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, technical: true},
-		{name: "fatal and target refusal", entries: []model.Diagnostic{fatalError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureTechnical}, parseErrors: 1, technical: true},
-		{name: "nonfatal and target refusal", entries: []model.Diagnostic{parseError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure}, parseErrors: 1, technical: true},
-		{name: "parse and read diagnostics coexist", entries: []model.Diagnostic{parseError, readError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, parseErrors: 1, technical: true},
+		{name: "fatal DSL", entries: []model.Diagnostic{fatalError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, failed: true},
+		{name: "IO001", entries: []model.Diagnostic{readError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, failed: true},
+		{name: "fatal and target refusal", entries: []model.Diagnostic{fatalError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureTechnical}, failed: true},
+		{name: "nonfatal and target refusal", entries: []model.Diagnostic{parseError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure}, parseErrors: 1, failed: true},
+		{name: "parse and read diagnostics coexist", entries: []model.Diagnostic{parseError, readError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, parseErrors: 1, failed: true},
+		{name: "all early fatal codes", entries: []model.Diagnostic{
+			{ID: "utf8", Source: "current", DiagnosticCode: diagnostics.P001, SeverityLevel: diagnostics.SeverityError, Fatal: true},
+			{ID: "newline", Source: "current", DiagnosticCode: diagnostics.P002, SeverityLevel: diagnostics.SeverityError, Fatal: true},
+			fatalError, readError,
+			{ID: "version", Source: "current", DiagnosticCode: diagnostics.P014, SeverityLevel: diagnostics.SeverityError, Fatal: true},
+		}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, failed: true},
+		{name: "fatal flag overrides parse code", entries: []model.Diagnostic{
+			{Source: "current", DiagnosticCode: diagnostics.P003, SeverityLevel: diagnostics.SeverityError, Fatal: true},
+		}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure}, failed: true},
+		{name: "custom fatal code", entries: []model.Diagnostic{
+			{Source: "current", DiagnosticCode: "CUSTOM001", SeverityLevel: diagnostics.SeverityError, Fatal: true},
+		}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure}, failed: true},
+		{name: "warnings and recommendations ignored", entries: []model.Diagnostic{
+			{Source: "current", SeverityLevel: diagnostics.SeverityWarning},
+			{Source: "current", SeverityLevel: diagnostics.SeverityRecommendation},
+		}, report: storage.Report{Action: storage.ActionCreated}},
 		{name: "historical errors ignored", entries: []model.Diagnostic{
 			{Source: "old", DiagnosticCode: diagnostics.P003, SeverityLevel: diagnostics.SeverityError},
 			{Source: "old", DiagnosticCode: diagnostics.IO001, SeverityLevel: diagnostics.SeverityError, Fatal: true},
 		}, report: storage.Report{Action: storage.ActionCreated, ErrorCount: 2}},
-		{name: "technical without diagnostics", report: storage.Report{Action: storage.ActionNotWritten, Err: failure}, technical: true},
-		{name: "unknown refusal", report: storage.Report{Action: storage.ActionNotWritten}, technical: true},
-		{name: "created with cleanup failure", report: storage.Report{Action: storage.ActionCreated, Err: failure}, technical: true},
-		{name: "replaced with cleanup failure", report: storage.Report{Action: storage.ActionReplaced, Err: failure}, technical: true},
+		{name: "technical without diagnostics", report: storage.Report{Action: storage.ActionNotWritten, Err: failure}, failed: true},
+		{name: "unknown refusal", report: storage.Report{Action: storage.ActionNotWritten}, failed: true},
+		{name: "created with cleanup failure", report: storage.Report{Action: storage.ActionCreated, Err: failure}, failed: true},
+		{name: "replaced with cleanup failure", report: storage.Report{Action: storage.ActionReplaced, Err: failure}, failed: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			result := model.Result{Processing: []model.Processing{{ID: "old"}, {ID: "current"}}, Diagnostics: test.entries}
 			before := summaryModelSnapshot(t, result)
 			summary := summarizeFile(result, test.report)
-			if summary.parseErrors != test.parseErrors || summary.technicalFailure != test.technical {
-				t.Fatalf("Ошибок разбора %d, технический сбой %t; требуется %d, %t", summary.parseErrors, summary.technicalFailure, test.parseErrors, test.technical)
+			if summary.parseErrors != test.parseErrors || isFailure(summary) != test.failed {
+				t.Fatalf("Ошибок разбора %d, сбой %t; требуется %d, %t", summary.parseErrors, isFailure(summary), test.parseErrors, test.failed)
 			}
 			if summary.errors != test.report.ErrorCount || summaryModelSnapshot(t, result) != before {
 				t.Fatal("Изменён отчёт файла или модель")

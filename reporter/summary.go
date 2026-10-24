@@ -14,10 +14,8 @@ type fileSummary struct {
 	lineCount *int
 	// errors — число диагностик уровня error из storage.Report.ErrorCount.
 	errors int
-	// parseErrors — число ошибок текущего разбора без технической IO001.
+	// parseErrors — число нефатальных ошибок текущего разбора без технической IO001.
 	parseErrors int
-	// technicalFailure — сбой чтения/обработки либо технический отказ сохранения.
-	technicalFailure bool
 	// action — фактическое действие с JSON из storage.Report.Action.
 	action storage.Action
 	// failure — причина отказа или сбоя из storage.Report.Err.
@@ -69,15 +67,9 @@ func summarizeFile(result model.Result, report storage.Report) fileSummary {
 		action:    report.Action,
 		failure:   report.Err,
 	}
-	summary.technicalFailure = isFailure(summary) && report.FailureKind != storage.FailureFatalDiagnostics
 	entries := currentDiagnostics(result)
 	for _, entry := range entries {
-		if entry.SeverityLevel != diagnostics.SeverityError {
-			continue
-		}
-		if entry.DiagnosticCode == diagnostics.IO001 {
-			summary.technicalFailure = true
-		} else {
+		if entry.SeverityLevel == diagnostics.SeverityError && !entry.Fatal && entry.DiagnosticCode != diagnostics.IO001 {
 			summary.parseErrors++
 		}
 	}

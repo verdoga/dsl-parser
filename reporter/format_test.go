@@ -141,9 +141,9 @@ func TestFormatFileLineEscapesReasonLineBreaks(t *testing.T) {
 
 func TestFormatTotalLineUsesProvidedCounters(t *testing.T) {
 	tests := []struct {
-		name                                                               string
-		total, saved, technicalFailures, filesWithParseErrors, parseErrors int
-		want                                                               string
+		name                                                      string
+		total, saved, failures, filesWithParseErrors, parseErrors int
+		want                                                      string
 	}{
 		{"empty", 0, 0, 0, 0, 0, "ИТОГО | всего: 0 | сохранено: 0 | сбоев: 0 | файлов с ошибками разбора: 0 | ошибок разбора: 0"},
 		{"successes", 3, 3, 0, 0, 0, "ИТОГО | всего: 3 | сохранено: 3 | сбоев: 0 | файлов с ошибками разбора: 0 | ошибок разбора: 0"},
@@ -154,7 +154,7 @@ func TestFormatTotalLineUsesProvidedCounters(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := formatTotalLine(test.total, test.saved, test.technicalFailures, test.filesWithParseErrors, test.parseErrors); got != test.want {
+			if got := formatTotalLine(test.total, test.saved, test.failures, test.filesWithParseErrors, test.parseErrors); got != test.want {
 				t.Errorf("итог = %q, требуется %q", got, test.want)
 			}
 		})

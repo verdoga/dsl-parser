@@ -100,21 +100,21 @@ func TestFailedReaderReturnsOriginalErrorWithoutBytes(t *testing.T) {
 
 func TestProcessFileSavesOrReportsOneFailure(t *testing.T) {
 	for _, test := range []struct {
-		name, source, status, detail                         string
-		existing, replace, missing, technical, saved         bool
-		errors                                               int
-		technicalFailures, filesWithParseErrors, parseErrors int
+		name, source, status, detail                 string
+		existing, replace, missing, technical, saved bool
+		errors                                       int
+		failures, filesWithParseErrors, parseErrors  int
 	}{
 		{name: "created", source: "@dsl-version 1.2\nText", status: "УСПЕХ: СОЗДАН", saved: true},
 		{name: "nonfatal diagnostic saved", source: "@dsl-version 1.2\n@unknown", status: "УСПЕХ: СОЗДАН", saved: true, errors: 1, filesWithParseErrors: 1, parseErrors: 1},
-		{name: "fatal diagnostic", status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: P013", errors: 1, filesWithParseErrors: 1, parseErrors: 1},
-		{name: "open failure", missing: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: IO001", errors: 1, technicalFailures: 1},
-		{name: "replacement denied", source: "@dsl-version 1.2\nText", existing: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "замена", technicalFailures: 1},
+		{name: "fatal diagnostic", status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: P013", errors: 1, failures: 1},
+		{name: "open failure", missing: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: IO001", errors: 1, failures: 1},
+		{name: "replacement denied", source: "@dsl-version 1.2\nText", existing: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "замена", failures: 1},
 		{name: "replacement allowed", source: "@dsl-version 1.2\nText", existing: true, replace: true, status: "УСПЕХ: ЗАМЕНЁН", saved: true},
-		{name: "fatal preserves existing JSON", existing: true, replace: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: P013", errors: 1, filesWithParseErrors: 1, parseErrors: 1},
-		{name: "fatal and replacement denied", existing: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: P013", errors: 1, technicalFailures: 1, filesWithParseErrors: 1, parseErrors: 1},
-		{name: "technical failure", source: "@dsl-version 1.2\nText", technical: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "не удалось разобрать файл", technicalFailures: 1},
-		{name: "technical failure preserves JSON", source: "@dsl-version 1.2\nText", technical: true, existing: true, replace: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "не удалось разобрать файл", technicalFailures: 1},
+		{name: "fatal preserves existing JSON", existing: true, replace: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: P013", errors: 1, failures: 1},
+		{name: "fatal and replacement denied", existing: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: P013", errors: 1, failures: 1},
+		{name: "technical failure", source: "@dsl-version 1.2\nText", technical: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "не удалось разобрать файл", failures: 1},
+		{name: "technical failure preserves JSON", source: "@dsl-version 1.2\nText", technical: true, existing: true, replace: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "не удалось разобрать файл", failures: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			r := runnerForTest(t)
@@ -142,7 +142,7 @@ func TestProcessFileSavesOrReportsOneFailure(t *testing.T) {
 				wantCode, success = 0, 1
 			}
 			wantTotal := fmt.Sprintf("ИТОГО | всего: 1 | сохранено: %d | сбоев: %d | файлов с ошибками разбора: %d | ошибок разбора: %d",
-				success, test.technicalFailures, test.filesWithParseErrors, test.parseErrors)
+				success, test.failures, test.filesWithParseErrors, test.parseErrors)
 			if len(lines) != 2 || code != wantCode || lines[1] != wantTotal {
 				t.Fatalf("Ожидается один отчёт и согласованный итог: %q, код %d", output, code)
 			}
