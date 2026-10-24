@@ -215,6 +215,47 @@ func TestSummaryFailureDependsOnlyOnStorageOutcome(t *testing.T) {
 	}
 }
 
+func TestSummarizeFileSeparatesCurrentParseErrorsAndTechnicalFailures(t *testing.T) {
+	parseError := model.Diagnostic{Source: "current", DiagnosticCode: diagnostics.P003, SeverityLevel: diagnostics.SeverityError}
+	fatalError := model.Diagnostic{ID: "fatal", Source: "current", DiagnosticCode: diagnostics.P013, SeverityLevel: diagnostics.SeverityError, Fatal: true}
+	readError := model.Diagnostic{ID: "io", Source: "current", DiagnosticCode: diagnostics.IO001, SeverityLevel: diagnostics.SeverityError, Fatal: true}
+	failure := errors.New("P013: текст причины не определяет вид сбоя")
+	for _, test := range []struct {
+		name        string
+		entries     []model.Diagnostic
+		report      storage.Report
+		parseErrors int
+		technical   bool
+	}{
+		{name: "saved with multiple parse errors", entries: []model.Diagnostic{parseError, parseError}, report: storage.Report{Action: storage.ActionCreated, ErrorCount: 17}, parseErrors: 2},
+		{name: "fatal DSL", entries: []model.Diagnostic{fatalError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, parseErrors: 1},
+		{name: "IO001", entries: []model.Diagnostic{readError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, technical: true},
+		{name: "fatal and target refusal", entries: []model.Diagnostic{fatalError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureTechnical}, parseErrors: 1, technical: true},
+		{name: "nonfatal and target refusal", entries: []model.Diagnostic{parseError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure}, parseErrors: 1, technical: true},
+		{name: "parse and read diagnostics coexist", entries: []model.Diagnostic{parseError, readError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, parseErrors: 1, technical: true},
+		{name: "historical errors ignored", entries: []model.Diagnostic{
+			{Source: "old", DiagnosticCode: diagnostics.P003, SeverityLevel: diagnostics.SeverityError},
+			{Source: "old", DiagnosticCode: diagnostics.IO001, SeverityLevel: diagnostics.SeverityError, Fatal: true},
+		}, report: storage.Report{Action: storage.ActionCreated, ErrorCount: 2}},
+		{name: "technical without diagnostics", report: storage.Report{Action: storage.ActionNotWritten, Err: failure}, technical: true},
+		{name: "unknown refusal", report: storage.Report{Action: storage.ActionNotWritten}, technical: true},
+		{name: "created with cleanup failure", report: storage.Report{Action: storage.ActionCreated, Err: failure}, technical: true},
+		{name: "replaced with cleanup failure", report: storage.Report{Action: storage.ActionReplaced, Err: failure}, technical: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := model.Result{Processing: []model.Processing{{ID: "old"}, {ID: "current"}}, Diagnostics: test.entries}
+			before := summaryModelSnapshot(t, result)
+			summary := summarizeFile(result, test.report)
+			if summary.parseErrors != test.parseErrors || summary.technicalFailure != test.technical {
+				t.Fatalf("Ошибок разбора %d, технический сбой %t; требуется %d, %t", summary.parseErrors, summary.technicalFailure, test.parseErrors, test.technical)
+			}
+			if summary.errors != test.report.ErrorCount || summaryModelSnapshot(t, result) != before {
+				t.Fatal("Изменён отчёт файла или модель")
+			}
+		})
+	}
+}
+
 func summaryModelSnapshot(t *testing.T, result model.Result) string {
 	t.Helper()
 	payload, err := json.Marshal(result)

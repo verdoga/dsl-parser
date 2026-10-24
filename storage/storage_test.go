@@ -191,19 +191,20 @@ func TestSaveReportsOutcomeAndPreservesModel(t *testing.T) {
 	tests := []struct {
 		name, failure                        string
 		existing, replace, fatal, badVersion bool
+		failureKind                          FailureKind
 	}{
 		{name: "created"},
 		{name: "without errors"},
 		{name: "warnings only"},
 		{name: "created with replace", replace: true},
 		{name: "replaced", existing: true, replace: true},
-		{name: "replacement denied", failure: "замена", existing: true, fatal: true, badVersion: true},
-		{name: "path first", failure: "абсолютным", existing: true, fatal: true, badVersion: true},
-		{name: "fatal before encoding", failure: "Z001: первая", fatal: true, badVersion: true},
-		{name: "fatal keeps original", failure: "Z001: первая", existing: true, replace: true, fatal: true},
-		{name: "unsupported format", failure: "формат", existing: true, replace: true, badVersion: true},
-		{name: "missing parent", failure: "временный файл"},
-		{name: "nil model", failure: "модель"},
+		{name: "replacement denied", failure: "замена", existing: true, fatal: true, badVersion: true, failureKind: FailureTechnical},
+		{name: "path first", failure: "абсолютным", existing: true, fatal: true, badVersion: true, failureKind: FailureTechnical},
+		{name: "fatal before encoding", failure: "Z001: первая", fatal: true, badVersion: true, failureKind: FailureFatalDiagnostics},
+		{name: "fatal keeps original", failure: "Z001: первая", existing: true, replace: true, fatal: true, failureKind: FailureFatalDiagnostics},
+		{name: "unsupported format", failure: "формат", existing: true, replace: true, badVersion: true, failureKind: FailureTechnical},
+		{name: "missing parent", failure: "временный файл", failureKind: FailureTechnical},
+		{name: "nil model", failure: "модель", failureKind: FailureTechnical},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -239,6 +240,9 @@ func TestSaveReportsOutcomeAndPreservesModel(t *testing.T) {
 			}
 			before := storageModelSnapshot(t, result)
 			report := Save(result, console.Params{Path: directory, Replace: test.replace})
+			if report.FailureKind != test.failureKind {
+				t.Fatalf("Вид отказа %q, требуется %q: %+v", report.FailureKind, test.failureKind, report)
+			}
 			if report.SourcePath != wantSource || report.TargetPath != wantTarget || report.ErrorCount != count {
 				t.Fatalf("неверные пути или число ошибок: %+v", report)
 			}

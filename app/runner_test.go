@@ -53,19 +53,37 @@ func TestNewResultInitializesIndependentModels(t *testing.T) {
 	}
 }
 
-func TestFinishProcessingMeasuresNonnegativeMilliseconds(t *testing.T) {
+func TestFinishProcessingMeasuresAtLeastOneMillisecond(t *testing.T) {
 	for _, offset := range []time.Duration{-1500 * time.Millisecond, 0, time.Hour} {
 		t.Run(offset.String(), func(t *testing.T) {
 			started := time.Now().Add(offset)
 			result := (&runner{version: "test"}).newResult("source.txt", started)
-			minimum := max(0, int(time.Since(started).Milliseconds()))
+			minimum := max(1, int(time.Since(started).Milliseconds()))
 			finishProcessing(&result, started)
-			maximum := max(0, int(time.Since(started).Milliseconds()))
+			maximum := max(1, int(time.Since(started).Milliseconds()))
 			if len(result.Processing) != 1 || result.Processing[0].DurationMs == nil {
 				t.Fatal("Не установлена длительность единственного запуска")
 			}
 			if got := *result.Processing[0].DurationMs; got < minimum || got > maximum {
 				t.Fatalf("Длительность %d мс вне диапазона [%d, %d]", got, minimum, maximum)
+			}
+		})
+	}
+}
+
+func TestDurationMillisecondsMinimumAndBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		elapsed time.Duration
+		want    int
+	}{
+		{-time.Second, 1}, {0, 1}, {time.Nanosecond, 1},
+		{time.Millisecond - time.Nanosecond, 1}, {time.Millisecond, 1},
+		{2*time.Millisecond - time.Nanosecond, 1}, {2 * time.Millisecond, 2},
+		{1500 * time.Millisecond, 1500},
+	} {
+		t.Run(test.elapsed.String(), func(t *testing.T) {
+			if got := durationMilliseconds(test.elapsed); got != test.want {
+				t.Fatalf("Длительность %d мс, требуется %d", got, test.want)
 			}
 		})
 	}
@@ -82,19 +100,21 @@ func TestFailedReaderReturnsOriginalErrorWithoutBytes(t *testing.T) {
 
 func TestProcessFileSavesOrReportsOneFailure(t *testing.T) {
 	for _, test := range []struct {
-		name, source, status, detail                 string
-		existing, replace, missing, technical, saved bool
-		errors                                       int
+		name, source, status, detail                         string
+		existing, replace, missing, technical, saved         bool
+		errors                                               int
+		technicalFailures, filesWithParseErrors, parseErrors int
 	}{
 		{name: "created", source: "@dsl-version 1.2\nText", status: "УСПЕХ: СОЗДАН", saved: true},
-		{name: "nonfatal diagnostic saved", source: "@dsl-version 1.2\n@unknown", status: "УСПЕХ: СОЗДАН", saved: true, errors: 1},
-		{name: "fatal diagnostic", status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: P013", errors: 1},
-		{name: "open failure", missing: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: IO001", errors: 1},
-		{name: "replacement denied", source: "@dsl-version 1.2\nText", existing: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "замена"},
+		{name: "nonfatal diagnostic saved", source: "@dsl-version 1.2\n@unknown", status: "УСПЕХ: СОЗДАН", saved: true, errors: 1, filesWithParseErrors: 1, parseErrors: 1},
+		{name: "fatal diagnostic", status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: P013", errors: 1, filesWithParseErrors: 1, parseErrors: 1},
+		{name: "open failure", missing: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: IO001", errors: 1, technicalFailures: 1},
+		{name: "replacement denied", source: "@dsl-version 1.2\nText", existing: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "замена", technicalFailures: 1},
 		{name: "replacement allowed", source: "@dsl-version 1.2\nText", existing: true, replace: true, status: "УСПЕХ: ЗАМЕНЁН", saved: true},
-		{name: "fatal preserves existing JSON", existing: true, replace: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: P013", errors: 1},
-		{name: "technical failure", source: "@dsl-version 1.2\nText", technical: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "не удалось разобрать файл"},
-		{name: "technical failure preserves JSON", source: "@dsl-version 1.2\nText", technical: true, existing: true, replace: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "не удалось разобрать файл"},
+		{name: "fatal preserves existing JSON", existing: true, replace: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: P013", errors: 1, filesWithParseErrors: 1, parseErrors: 1},
+		{name: "fatal and replacement denied", existing: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "фатальная ошибка: P013", errors: 1, technicalFailures: 1, filesWithParseErrors: 1, parseErrors: 1},
+		{name: "technical failure", source: "@dsl-version 1.2\nText", technical: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "не удалось разобрать файл", technicalFailures: 1},
+		{name: "technical failure preserves JSON", source: "@dsl-version 1.2\nText", technical: true, existing: true, replace: true, status: "ОШИБКА: НЕ СОЗДАН", detail: "не удалось разобрать файл", technicalFailures: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			r := runnerForTest(t)
@@ -121,7 +141,9 @@ func TestProcessFileSavesOrReportsOneFailure(t *testing.T) {
 			if test.saved {
 				wantCode, success = 0, 1
 			}
-			if len(lines) != 2 || code != wantCode || lines[1] != fmt.Sprintf("ИТОГО | всего: 1 | успех: %d | ошибка: %d", success, wantCode) {
+			wantTotal := fmt.Sprintf("ИТОГО | всего: 1 | сохранено: %d | сбоев: %d | файлов с ошибками разбора: %d | ошибок разбора: %d",
+				success, test.technicalFailures, test.filesWithParseErrors, test.parseErrors)
+			if len(lines) != 2 || code != wantCode || lines[1] != wantTotal {
 				t.Fatalf("Ожидается один отчёт и согласованный итог: %q, код %d", output, code)
 			}
 			if !strings.HasPrefix(lines[0], test.status+" | ") || !strings.Contains(lines[0], fmt.Sprintf("путь: %q", path)) || !strings.Contains(lines[0], fmt.Sprintf(" | ошибок: %d", test.errors)) || !strings.Contains(lines[0], test.detail) {
@@ -148,7 +170,7 @@ func TestProcessFileSavesOrReportsOneFailure(t *testing.T) {
 			if result.Format != model.FormatVersion1 || result.Document.FilePath == nil || *result.Document.FilePath != path || result.Document.FileName == nil || *result.Document.FileName != "source.TXT" || len(result.Lines) != 2 || len(result.Diagnostics) != test.errors || result.Document.HasErrors != (test.errors > 0) {
 				t.Fatalf("Неверный сохранённый результат: %+v", result)
 			}
-			if len(result.Processing) != 1 || result.Processing[0].DurationMs == nil || *result.Processing[0].DurationMs < 0 || result.Processing[0].StartedAt == nil || result.Processing[0].Version == nil || *result.Processing[0].Version != r.version {
+			if len(result.Processing) != 1 || result.Processing[0].DurationMs == nil || *result.Processing[0].DurationMs < 1 || result.Processing[0].StartedAt == nil || result.Processing[0].Version == nil || *result.Processing[0].Version != r.version {
 				t.Fatalf("В JSON отсутствует завершённая обработка: %+v", result.Processing)
 			}
 			started, err := time.Parse(time.RFC3339, *result.Processing[0].StartedAt)
@@ -192,7 +214,7 @@ func TestProcessFileContinuesWithIndependentResultAfterFailure(t *testing.T) {
 	var code int
 	output := captureRunnerOutput(t, func() { r.processFile(missing); r.processFile(valid); code = r.reporter.Finish() })
 	lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
-	if len(lines) != 3 || !strings.Contains(lines[0], "фатальная ошибка: IO001") || !strings.HasPrefix(lines[1], "УСПЕХ: СОЗДАН") || lines[2] != "ИТОГО | всего: 2 | успех: 1 | ошибка: 1" || code != 1 {
+	if len(lines) != 3 || !strings.Contains(lines[0], "фатальная ошибка: IO001") || !strings.HasPrefix(lines[1], "УСПЕХ: СОЗДАН") || lines[2] != "ИТОГО | всего: 2 | сохранено: 1 | сбоев: 1 | файлов с ошибками разбора: 0 | ошибок разбора: 0" || code != 1 {
 		t.Fatalf("Неверное продолжение после отказа: %q, код %d", output, code)
 	}
 	payload, err := os.ReadFile(filepath.Join(r.params.Path, "valid.json"))

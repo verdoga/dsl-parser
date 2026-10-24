@@ -258,7 +258,7 @@ func TestProductionFirstVersionRulesCannotBeBypassed(t *testing.T) {
 			code, stdout, stderr := captureRunOutput(t, func() int { return Run([]string{path}, "production-test") })
 			// storage не сохраняет JSON при fatal: проверяем явный код ошибки
 			// в отчёте, единственный отказ и отсутствие выходного файла.
-			if code != 1 || stderr != "" || strings.Count(stdout, "фатальная ошибка:") != 1 || !strings.Contains(stdout, "фатальная ошибка: "+string(tc.code)) || !strings.Contains(stdout, "ошибок: 1") || !strings.Contains(stdout, "ИТОГО | всего: 1 | успех: 0 | ошибка: 1") {
+			if code != 1 || stderr != "" || strings.Count(stdout, "фатальная ошибка:") != 1 || !strings.Contains(stdout, "фатальная ошибка: "+string(tc.code)) || !strings.Contains(stdout, "ошибок: 1") || !strings.HasSuffix(stdout, "ИТОГО | всего: 1 | сохранено: 0 | сбоев: 0 | файлов с ошибками разбора: 1 | ошибок разбора: 1\n") {
 				t.Fatalf("Неверный ранний отказ: code=%d, stdout=%q, stderr=%q", code, stdout, stderr)
 			}
 			if _, err := os.Stat(strings.TrimSuffix(path, ".txt") + ".json"); !errors.Is(err, os.ErrNotExist) {

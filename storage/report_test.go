@@ -35,7 +35,7 @@ func TestNewReportPreservesAttemptResult(t *testing.T) {
 	}{
 		{
 			name: "not written",
-			want: Report{SourcePath: "/docs/lesson.txt", TargetPath: "/docs/lesson.json", Action: ActionNotWritten, ErrorCount: 2, Err: writeErr},
+			want: Report{SourcePath: "/docs/lesson.txt", TargetPath: "/docs/lesson.json", Action: ActionNotWritten, ErrorCount: 2, FailureKind: FailureTechnical, Err: writeErr},
 		},
 		{
 			name: "created",
@@ -47,15 +47,19 @@ func TestNewReportPreservesAttemptResult(t *testing.T) {
 		},
 		{
 			name: "created with cleanup error",
-			want: Report{SourcePath: "/docs/lesson.txt", TargetPath: "/docs/lesson.json", Action: ActionCreated, ErrorCount: 1, Err: cleanupErr},
+			want: Report{SourcePath: "/docs/lesson.txt", TargetPath: "/docs/lesson.json", Action: ActionCreated, ErrorCount: 1, FailureKind: FailureTechnical, Err: cleanupErr},
 		},
 		{
 			name: "replaced with cleanup error",
-			want: Report{SourcePath: "/docs/lesson.txt", TargetPath: "/docs/lesson.json", Action: ActionReplaced, ErrorCount: 4, Err: cleanupErr},
+			want: Report{SourcePath: "/docs/lesson.txt", TargetPath: "/docs/lesson.json", Action: ActionReplaced, ErrorCount: 4, FailureKind: FailureTechnical, Err: cleanupErr},
 		},
 		{
 			name: "unknown paths",
-			want: Report{Action: ActionNotWritten, Err: writeErr},
+			want: Report{Action: ActionNotWritten, FailureKind: FailureTechnical, Err: writeErr},
+		},
+		{
+			name: "not written without reason",
+			want: Report{Action: ActionNotWritten, FailureKind: FailureTechnical},
 		},
 	}
 	for _, test := range tests {
@@ -70,6 +74,9 @@ func TestNewReportPreservesAttemptResult(t *testing.T) {
 			}
 			if got.Err != want.Err {
 				t.Errorf("Err = %v, требуется исходная ошибка %v", got.Err, want.Err)
+			}
+			if got.FailureKind != want.FailureKind {
+				t.Errorf("Вид отказа = %q, требуется %q", got.FailureKind, want.FailureKind)
 			}
 		})
 	}
@@ -97,7 +104,7 @@ func TestNewReportPreservesPathsWithoutFilesystemValidation(t *testing.T) {
 	}
 }
 
-func TestReportJSONOmitsErr(t *testing.T) {
+func TestReportJSONOmitsInternalFields(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
@@ -119,6 +126,9 @@ func TestReportJSONOmitsErr(t *testing.T) {
 			if _, exists := fields["Err"]; exists {
 				t.Errorf("Err попал в JSON: %s", payload)
 			}
+			if _, exists := fields["FailureKind"]; exists {
+				t.Errorf("FailureKind попал в JSON: %s", payload)
+			}
 			if len(fields) != 4 {
 				t.Errorf("в JSON требуется четыре поля отчёта без ошибки: %s", payload)
 			}
@@ -127,7 +137,7 @@ func TestReportJSONOmitsErr(t *testing.T) {
 				t.Fatalf("чтение отчёта: %v", err)
 			}
 			if decoded.SourcePath != report.SourcePath || decoded.TargetPath != report.TargetPath ||
-				decoded.Action != report.Action || decoded.ErrorCount != report.ErrorCount || decoded.Err != nil {
+				decoded.Action != report.Action || decoded.ErrorCount != report.ErrorCount || decoded.Err != nil || decoded.FailureKind != "" {
 				t.Errorf("JSON не сохранил поля отчёта без ошибки: %+v", decoded)
 			}
 		})

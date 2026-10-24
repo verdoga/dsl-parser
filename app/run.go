@@ -34,7 +34,9 @@ const (
 )
 
 // Run получает аргументы без имени программы и непустую версию инструмента,
-// заданную при сборке. Передаёт args в console.Parse с os.Stdout и os.Stderr;
+// заданную при сборке. При непустой версии сначала печатает в os.Stdout
+// имя и версию из тех же значений, что используются в Processing.
+// Передаёт args в console.Parse с os.Stdout и os.Stderr;
 // при proceed=false возвращает 0 для справки либо 2 для ошибки без повторной
 // печати. Пустую версию считает ошибкой конфигурации: печатает её и возвращает
 // 1. После проверки версии вызывает discovery.Find. Ошибку обхода
@@ -45,6 +47,9 @@ const (
 // повышая 0 до 1 при ошибке discovery. Ноль найденных TXT без ошибки допустим.
 // Run не вызывает os.Exit: возвращённый код передаёт ему пакет main.
 func Run(args []string, version string) int {
+	if version != "" {
+		fmt.Fprintf(os.Stdout, "%s v%s\n", toolName, version)
+	}
 	params, proceed, err := console.Parse(args, os.Stdout, os.Stderr)
 	if !proceed {
 		if err != nil {

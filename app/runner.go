@@ -105,12 +105,17 @@ func (r *runner) newResult(path string, startedAt time.Time) model.Result {
 	}
 }
 
-// finishProcessing устанавливает неотрицательное DurationMs в миллисекундах
+// finishProcessing устанавливает DurationMs в миллисекундах, не меньше 1,
 // у единственной записи Processing непосредственно перед storage.Save либо
 // отчётом об отказе; время сохранения JSON в длительность не входит.
 func finishProcessing(result *model.Result, startedAt time.Time) {
-	duration := max(0, int(time.Since(startedAt).Milliseconds()))
+	duration := durationMilliseconds(time.Since(startedAt))
 	result.Processing[0].DurationMs = &duration
+}
+
+// durationMilliseconds ограничивает целую длительность снизу одной миллисекундой.
+func durationMilliseconds(elapsed time.Duration) int {
+	return max(1, int(elapsed.Milliseconds()))
 }
 
 // recordFailure создаёт storage.NewReport с исходным путём, пустым TargetPath,

@@ -141,19 +141,20 @@ func TestFormatFileLineEscapesReasonLineBreaks(t *testing.T) {
 
 func TestFormatTotalLineUsesProvidedCounters(t *testing.T) {
 	tests := []struct {
-		name                   string
-		total, success, failed int
-		want                   string
+		name                                                               string
+		total, saved, technicalFailures, filesWithParseErrors, parseErrors int
+		want                                                               string
 	}{
-		{"empty", 0, 0, 0, "ИТОГО | всего: 0 | успех: 0 | ошибка: 0"},
-		{"successes", 3, 3, 0, "ИТОГО | всего: 3 | успех: 3 | ошибка: 0"},
-		{"failures", 2, 0, 2, "ИТОГО | всего: 2 | успех: 0 | ошибка: 2"},
-		{"mixed", 12, 7, 5, "ИТОГО | всего: 12 | успех: 7 | ошибка: 5"},
-		{"no recalculation", 9, 2, 3, "ИТОГО | всего: 9 | успех: 2 | ошибка: 3"},
+		{"empty", 0, 0, 0, 0, 0, "ИТОГО | всего: 0 | сохранено: 0 | сбоев: 0 | файлов с ошибками разбора: 0 | ошибок разбора: 0"},
+		{"successes", 3, 3, 0, 0, 0, "ИТОГО | всего: 3 | сохранено: 3 | сбоев: 0 | файлов с ошибками разбора: 0 | ошибок разбора: 0"},
+		{"failures", 2, 0, 2, 0, 0, "ИТОГО | всего: 2 | сохранено: 0 | сбоев: 2 | файлов с ошибками разбора: 0 | ошибок разбора: 0"},
+		{"mixed", 12, 7, 5, 3, 8, "ИТОГО | всего: 12 | сохранено: 7 | сбоев: 5 | файлов с ошибками разбора: 3 | ошибок разбора: 8"},
+		{"provided example", 14, 14, 0, 2, 2, "ИТОГО | всего: 14 | сохранено: 14 | сбоев: 0 | файлов с ошибками разбора: 2 | ошибок разбора: 2"},
+		{"saved with failure", 1, 1, 1, 0, 0, "ИТОГО | всего: 1 | сохранено: 1 | сбоев: 1 | файлов с ошибками разбора: 0 | ошибок разбора: 0"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := formatTotalLine(test.total, test.success, test.failed); got != test.want {
+			if got := formatTotalLine(test.total, test.saved, test.technicalFailures, test.filesWithParseErrors, test.parseErrors); got != test.want {
 				t.Errorf("итог = %q, требуется %q", got, test.want)
 			}
 		})
@@ -174,7 +175,7 @@ func TestFormattingDoesNotPrint(t *testing.T) {
 	actionText(storage.ActionCreated)
 	formatFileLine(fileSummary{action: storage.ActionCreated})
 	formatFileLine(fileSummary{action: storage.ActionNotWritten, failure: errors.New("отказ")})
-	formatTotalLine(2, 1, 1)
+	formatTotalLine(2, 1, 1, 1, 3)
 	info, err := capture.Stat()
 	if err != nil {
 		t.Fatal(err)
