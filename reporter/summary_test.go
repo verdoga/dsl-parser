@@ -123,6 +123,7 @@ func TestSummarizeFilePreservesReportAndModelOwnership(t *testing.T) {
 		entries     []model.Diagnostic
 		fatalIndex  int
 		unknownPath bool
+		early       bool
 	}{
 		{name: "unknown count", fatalIndex: -1},
 		{name: "zero count", lineCount: &zero, fatalIndex: -1},
@@ -133,10 +134,10 @@ func TestSummarizeFilePreservesReportAndModelOwnership(t *testing.T) {
 			entries:    []model.Diagnostic{{ID: "old-fatal", Source: "old", DiagnosticCode: diagnostics.P001, Fatal: true}}},
 		{name: "no processing", lineCount: &count, fatalIndex: -1,
 			entries: []model.Diagnostic{{ID: "orphan", DiagnosticCode: diagnostics.IO001, Fatal: true}}},
-		{name: "other fatal code", lineCount: &count, fatalIndex: -1,
+		{name: "other fatal code", lineCount: &count, fatalIndex: 0,
 			processing: []model.Processing{{ID: "current"}},
 			entries:    []model.Diagnostic{{ID: "other", Source: "current", DiagnosticCode: diagnostics.P003, Fatal: true}}},
-		{name: "first current fatal belongs to model", lineCount: &count, fatalIndex: 2,
+		{name: "first current fatal belongs to model", lineCount: &count, fatalIndex: 2, early: true,
 			processing: []model.Processing{{ID: "old"}, {ID: "current"}},
 			entries: []model.Diagnostic{
 				{ID: "old-fatal", Source: "old", DiagnosticCode: diagnostics.IO001, Fatal: true},
@@ -163,15 +164,22 @@ func TestSummarizeFilePreservesReportAndModelOwnership(t *testing.T) {
 			}
 			got := summarizeFile(result, report)
 			if got.path != report.SourcePath || got.action != report.Action ||
-				got.errors != report.ErrorCount || got.failure != failure {
+				got.failure != failure {
 				t.Fatalf("сведения отчёта не сохранены: %+v", got)
 			}
 			if test.fatalIndex >= 0 {
-				if got.fatal != &result.Diagnostics[test.fatalIndex] || got.lineCount != nil {
+				if got.fatal != &result.Diagnostics[test.fatalIndex] {
 					t.Fatalf("неверная фатальная запись или число строк: %+v", got)
 				}
 			} else if got.fatal != nil || got.lineCount != test.lineCount {
 				t.Fatalf("изменено число строк или добавлена фатальная пометка: %+v", got)
+			}
+			wantCount := test.lineCount
+			if test.early {
+				wantCount = nil
+			}
+			if got.lineCount != wantCount {
+				t.Fatalf("неверное число строк: %+v", got)
 			}
 			if summaryModelSnapshot(t, result) != before {
 				t.Fatal("модель изменена")
@@ -180,32 +188,36 @@ func TestSummarizeFilePreservesReportAndModelOwnership(t *testing.T) {
 	}
 }
 
-func TestSummaryFailureDependsOnlyOnStorageOutcome(t *testing.T) {
+func TestSummaryFailureIncludesFatalAndStorageOutcome(t *testing.T) {
 	failure := errors.New("ошибка записи или очистки")
 	tests := []struct {
 		name   string
 		action storage.Action
 		err    error
 		want   bool
+		fatal  bool
 	}{
-		{"not written", storage.ActionNotWritten, failure, true},
-		{"created", storage.ActionCreated, nil, false},
-		{"replaced", storage.ActionReplaced, nil, false},
-		{"created with cleanup failure", storage.ActionCreated, failure, true},
-		{"replaced with cleanup failure", storage.ActionReplaced, failure, true},
+		{"not written", storage.ActionNotWritten, failure, true, false},
+		{"created", storage.ActionCreated, nil, false, false},
+		{"replaced", storage.ActionReplaced, nil, false, false},
+		{"created with cleanup failure", storage.ActionCreated, failure, true, false},
+		{"replaced with cleanup failure", storage.ActionReplaced, failure, true, false},
+		{"fatal overrides created report", storage.ActionCreated, nil, true, true},
+		{"fatal overrides replaced report", storage.ActionReplaced, nil, true, true},
+		{"fatal and write failure", storage.ActionNotWritten, failure, true, true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			result := model.Result{
 				Processing:  []model.Processing{{ID: "current"}},
-				Diagnostics: []model.Diagnostic{{ID: "fatal", Source: "current", DiagnosticCode: diagnostics.P002, Fatal: true}},
+				Diagnostics: []model.Diagnostic{{ID: "diagnostic", Source: "current", DiagnosticCode: diagnostics.P002, Fatal: test.fatal}},
 			}
 			report := storage.Report{Action: test.action, Err: test.err, ErrorCount: 5}
 			summary := summarizeFile(result, report)
-			if summary.action != test.action || summary.failure != test.err || summary.errors != 5 {
+			if summary.action != test.action || summary.failure != test.err {
 				t.Fatalf("фактический итог изменён: %+v", summary)
 			}
-			if summary.fatal != &result.Diagnostics[0] || summary.lineCount != nil {
+			if test.fatal && (summary.fatal != &result.Diagnostics[0] || summary.lineCount != nil) {
 				t.Fatalf("ранняя фатальная диагностика потеряна: %+v", summary)
 			}
 			if got := isFailure(summary); got != test.want {
@@ -229,6 +241,8 @@ func TestSummarizeFileSeparatesCurrentParseErrorsAndFailures(t *testing.T) {
 	}{
 		{name: "saved with multiple parse errors", entries: []model.Diagnostic{parseError, parseError}, report: storage.Report{Action: storage.ActionCreated, ErrorCount: 17}, parseErrors: 2},
 		{name: "fatal DSL", entries: []model.Diagnostic{fatalError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, failed: true},
+		{name: "fatal and nonfatal with misleading success report", entries: []model.Diagnostic{fatalError, parseError}, report: storage.Report{Action: storage.ActionCreated}, parseErrors: 1, failed: true},
+		{name: "custom fatal with misleading success report", entries: []model.Diagnostic{{Source: "current", DiagnosticCode: "CUSTOM001", SeverityLevel: diagnostics.SeverityError, Fatal: true}}, report: storage.Report{Action: storage.ActionReplaced}, failed: true},
 		{name: "IO001", entries: []model.Diagnostic{readError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, failed: true},
 		{name: "fatal and target refusal", entries: []model.Diagnostic{fatalError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureTechnical}, failed: true},
 		{name: "nonfatal and target refusal", entries: []model.Diagnostic{parseError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure}, parseErrors: 1, failed: true},
@@ -265,7 +279,7 @@ func TestSummarizeFileSeparatesCurrentParseErrorsAndFailures(t *testing.T) {
 			if summary.parseErrors != test.parseErrors || isFailure(summary) != test.failed {
 				t.Fatalf("Ошибок разбора %d, сбой %t; требуется %d, %t", summary.parseErrors, isFailure(summary), test.parseErrors, test.failed)
 			}
-			if summary.errors != test.report.ErrorCount || summaryModelSnapshot(t, result) != before {
+			if summaryModelSnapshot(t, result) != before {
 				t.Fatal("Изменён отчёт файла или модель")
 			}
 		})

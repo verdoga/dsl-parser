@@ -26,43 +26,43 @@ func TestReporterRecordsOutcomesAndFinishesRun(t *testing.T) {
 	}{
 		{
 			report: storage.Report{SourcePath: "/docs/created.txt", Action: storage.ActionCreated},
-			want:   `УСПЕХ: СОЗДАН | путь: "/docs/created.txt" | строк: 3 | ошибок: 0`,
+			want:   `УСПЕХ: СОЗДАН | путь: "/docs/created.txt" | строк: 3 | ошибок разбора: 0`,
 		},
 		{
 			report: storage.Report{SourcePath: "/docs/replaced.txt", Action: storage.ActionReplaced},
-			want:   `УСПЕХ: ЗАМЕНЁН | путь: "/docs/replaced.txt" | строк: 3 | ошибок: 0`,
+			want:   `УСПЕХ: ЗАМЕНЁН | путь: "/docs/replaced.txt" | строк: 3 | ошибок разбора: 0`,
 		},
 		{
 			report:      storage.Report{SourcePath: "/docs/diagnostics.txt", Action: storage.ActionCreated, ErrorCount: 7},
 			diagnostics: parseDiagnostics,
-			want:        `УСПЕХ: СОЗДАН | путь: "/docs/diagnostics.txt" | строк: 3 | ошибок: 7`,
+			want:        `УСПЕХ: СОЗДАН | путь: "/docs/diagnostics.txt" | строк: 3 | ошибок разбора: 7`,
 		},
 		{
 			report: storage.Report{SourcePath: "/docs/denied.txt", Action: storage.ActionNotWritten, Err: errors.New("замена запрещена")},
-			want:   `ОШИБКА: НЕ СОЗДАН | путь: "/docs/denied.txt" | строк: 3 | ошибок: 0 | причина: замена запрещена`,
+			want:   `ОШИБКА: НЕ СОЗДАН | путь: "/docs/denied.txt" | строк: 3 | ошибок разбора: 0 | причина: замена запрещена`,
 		},
 		{
 			report: storage.Report{SourcePath: "/docs/cleanup-created.txt", Action: storage.ActionCreated, Err: errors.New("ошибка очистки")},
-			want:   `ОШИБКА: СОЗДАН | путь: "/docs/cleanup-created.txt" | строк: 3 | ошибок: 0 | причина: ошибка очистки`,
+			want:   `ОШИБКА: СОЗДАН | путь: "/docs/cleanup-created.txt" | строк: 3 | ошибок разбора: 0 | причина: ошибка очистки`,
 		},
 		{
 			report: storage.Report{SourcePath: "/docs/cleanup-replaced.txt", Action: storage.ActionReplaced, Err: errors.New("ошибка очистки")},
-			want:   `ОШИБКА: ЗАМЕНЁН | путь: "/docs/cleanup-replaced.txt" | строк: 3 | ошибок: 0 | причина: ошибка очистки`,
+			want:   `ОШИБКА: ЗАМЕНЁН | путь: "/docs/cleanup-replaced.txt" | строк: 3 | ошибок разбора: 0 | причина: ошибка очистки`,
 		},
 		{
 			report:      storage.Report{SourcePath: "/docs/fatal.txt", Action: storage.ActionNotWritten, ErrorCount: 1, FailureKind: storage.FailureFatalDiagnostics, Err: errors.New("ошибка DSL")},
 			diagnostics: []model.Diagnostic{{ID: "fatal", Source: "current", DiagnosticCode: diagnostics.P013, SeverityLevel: diagnostics.SeverityError, Fatal: true}},
-			want:        `ОШИБКА: НЕ СОЗДАН | путь: "/docs/fatal.txt" | строк: нет данных | ошибок: 1 | причина: ошибка DSL | фатальная ошибка: P013`,
+			want:        `ОШИБКА: НЕ СОЗДАН | путь: "/docs/fatal.txt" | строк: нет данных | ошибок разбора: 0 | причина: ошибка DSL | фатальная ошибка: P013`,
 		},
 		{
 			report:      storage.Report{SourcePath: "/docs/unreadable.txt", Action: storage.ActionNotWritten, ErrorCount: 1, FailureKind: storage.FailureFatalDiagnostics, Err: errors.New("нет доступа")},
 			diagnostics: []model.Diagnostic{{ID: "io", Source: "current", DiagnosticCode: diagnostics.IO001, SeverityLevel: diagnostics.SeverityError, Fatal: true}},
-			want:        `ОШИБКА: НЕ СОЗДАН | путь: "/docs/unreadable.txt" | строк: нет данных | ошибок: 1 | причина: нет доступа | фатальная ошибка: IO001`,
+			want:        `ОШИБКА: НЕ СОЗДАН | путь: "/docs/unreadable.txt" | строк: нет данных | ошибок разбора: 0 | причина: нет доступа | фатальная ошибка: IO001`,
 		},
 		{
 			report:      storage.Report{SourcePath: "/docs/diagnostics-denied.txt", Action: storage.ActionNotWritten, ErrorCount: 7, FailureKind: storage.FailureTechnical, Err: errors.New("замена запрещена")},
 			diagnostics: parseDiagnostics,
-			want:        `ОШИБКА: НЕ СОЗДАН | путь: "/docs/diagnostics-denied.txt" | строк: 3 | ошибок: 7 | причина: замена запрещена`,
+			want:        `ОШИБКА: НЕ СОЗДАН | путь: "/docs/diagnostics-denied.txt" | строк: 3 | ошибок разбора: 7 | причина: замена запрещена`,
 		},
 		{
 			report: storage.Report{SourcePath: "/docs/multiple-fatal.txt", Action: storage.ActionNotWritten, ErrorCount: 2, FailureKind: storage.FailureFatalDiagnostics, Err: errors.New("несколько фатальных ошибок")},
@@ -70,7 +70,7 @@ func TestReporterRecordsOutcomesAndFinishesRun(t *testing.T) {
 				{ID: "fatal-1", Source: "current", DiagnosticCode: diagnostics.P013, SeverityLevel: diagnostics.SeverityError, Fatal: true},
 				{ID: "fatal-2", Source: "current", DiagnosticCode: diagnostics.P014, SeverityLevel: diagnostics.SeverityError, Fatal: true},
 			},
-			want: `ОШИБКА: НЕ СОЗДАН | путь: "/docs/multiple-fatal.txt" | строк: нет данных | ошибок: 2 | причина: несколько фатальных ошибок | фатальная ошибка: P013`,
+			want: `ОШИБКА: НЕ СОЗДАН | путь: "/docs/multiple-fatal.txt" | строк: нет данных | ошибок разбора: 0 | причина: несколько фатальных ошибок | фатальная ошибка: P013`,
 		},
 	}
 	tests := []struct {
@@ -140,7 +140,7 @@ func TestReporterPrintsCurrentFatalAndEscapedReasonOnOneLine(t *testing.T) {
 		r.Record(result, report)
 		code = r.Finish()
 	})
-	want := `ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок: 2 | причина: первая\r\nвторая | фатальная ошибка: P014` + "\n" +
+	want := `ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок разбора: 0 | причина: первая\r\nвторая | фатальная ошибка: P014` + "\n" +
 		"ИТОГО | всего: 1 | сохранено: 0 | сбоев: 1 | файлов с ошибками разбора: 0 | ошибок разбора: 0\n"
 	if output != want || code != 1 {
 		t.Fatalf("вывод = %q, код = %d; требуется %q, код 1", output, code, want)
@@ -158,9 +158,9 @@ func TestReporterInstancesKeepIndependentCounters(t *testing.T) {
 		firstCode = first.Finish()
 		secondCode = second.Finish()
 	})
-	want := "ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок: 0 | причина: отказ\n" +
-		`УСПЕХ: СОЗДАН | путь: "/docs/first.txt" | строк: нет данных | ошибок: 0` + "\n" +
-		`УСПЕХ: ЗАМЕНЁН | путь: "/docs/second.txt" | строк: нет данных | ошибок: 0` + "\n" +
+	want := "ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок разбора: 0 | причина: отказ\n" +
+		`УСПЕХ: СОЗДАН | путь: "/docs/first.txt" | строк: нет данных | ошибок разбора: 0` + "\n" +
+		`УСПЕХ: ЗАМЕНЁН | путь: "/docs/second.txt" | строк: нет данных | ошибок разбора: 0` + "\n" +
 		"ИТОГО | всего: 2 | сохранено: 1 | сбоев: 1 | файлов с ошибками разбора: 0 | ошибок разбора: 0\n" +
 		"ИТОГО | всего: 1 | сохранено: 1 | сбоев: 0 | файлов с ошибками разбора: 0 | ошибок разбора: 0\n"
 	if output != want {
@@ -178,10 +178,59 @@ func TestReporterNotWrittenWithoutReason(t *testing.T) {
 		r.Record(model.Result{}, storage.Report{Action: storage.ActionNotWritten})
 		code = r.Finish()
 	})
-	want := "ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок: 0 | причина: причина не указана\n" +
+	want := "ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок разбора: 0 | причина: причина не указана\n" +
 		"ИТОГО | всего: 1 | сохранено: 0 | сбоев: 1 | файлов с ошибками разбора: 0 | ошибок разбора: 0\n"
 	if output != want || code != 1 {
 		t.Fatalf("вывод = %q, код = %d; требуется %q, код 1", output, code, want)
+	}
+}
+
+func TestReporterReconcilesCurrentNonfatalErrorsWithFileLine(t *testing.T) {
+	result := model.Result{
+		Processing: []model.Processing{{ID: "old"}, {ID: "current"}},
+		Diagnostics: []model.Diagnostic{
+			{ID: "history", Source: "old", DiagnosticCode: diagnostics.P003, SeverityLevel: diagnostics.SeverityError},
+			{ID: "f1", Source: "current", DiagnosticCode: diagnostics.P001, SeverityLevel: diagnostics.SeverityError, Fatal: true},
+			{ID: "f2", Source: "current", DiagnosticCode: diagnostics.P002, SeverityLevel: diagnostics.SeverityError, Fatal: true},
+			{ID: "e1", Source: "current", DiagnosticCode: diagnostics.P003, SeverityLevel: diagnostics.SeverityError},
+			{ID: "e2", Source: "current", DiagnosticCode: diagnostics.P006, SeverityLevel: diagnostics.SeverityError},
+			{ID: "w1", Source: "current", SeverityLevel: diagnostics.SeverityWarning},
+			{ID: "r1", Source: "current", SeverityLevel: diagnostics.SeverityRecommendation},
+		},
+	}
+	var code int
+	output := captureReporterOutput(t, func() {
+		r := reporter.New()
+		r.Record(result, storage.Report{Action: storage.ActionNotWritten, ErrorCount: 5, Err: errors.New("отказ")})
+		code = r.Finish()
+	})
+	want := "ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок разбора: 2 | причина: отказ | фатальная ошибка: P001\n" +
+		"ИТОГО | всего: 1 | сохранено: 0 | сбоев: 1 | файлов с ошибками разбора: 1 | ошибок разбора: 2\n"
+	if output != want || code != 1 {
+		t.Fatalf("inconsistent categories: exit=%d, %s", code, output)
+	}
+}
+
+func TestReporterIncompleteDiscoveryDoesNotInventFailedFiles(t *testing.T) {
+	for _, withFile := range []bool{false, true} {
+		t.Run(fmt.Sprint(withFile), func(t *testing.T) {
+			r := reporter.New()
+			if withFile {
+				captureReporterOutput(t, func() { r.Record(model.Result{}, storage.Report{Action: storage.ActionCreated}) })
+			}
+			r.MarkIncompleteDiscovery()
+			r.MarkIncompleteDiscovery()
+			var code int
+			output := captureReporterOutput(t, func() { code = r.Finish() })
+			count := 0
+			if withFile {
+				count = 1
+			}
+			want := fmt.Sprintf("ИТОГО | всего: %d | сохранено: %d | сбоев: 0 | файлов с ошибками разбора: 0 | ошибок разбора: 0 | обход: неполный\n", count, count)
+			if output != want || code != 1 {
+				t.Fatalf("incomplete discovery: exit=%d, %s", code, output)
+			}
+		})
 	}
 }
 

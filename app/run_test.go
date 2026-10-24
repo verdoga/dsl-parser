@@ -197,7 +197,7 @@ func TestRunPreservesPartialDiscoveryResultsAndFailsOnWalkError(t *testing.T) {
 				writeRunSource(t, root, fmt.Sprintf("file%d.txt", i), "@dsl-version 1.2")
 			}
 			code, stdout, stderr := captureRunOutput(t, func() int { return Run([]string{root}, "test") })
-			wantTotal := fmt.Sprintf("ИТОГО | всего: %d | сохранено: %d | сбоев: 0 | файлов с ошибками разбора: 0 | ошибок разбора: 0\n", count, count)
+			wantTotal := fmt.Sprintf("ИТОГО | всего: %d | сохранено: %d | сбоев: 0 | файлов с ошибками разбора: 0 | ошибок разбора: 0 | обход: неполный\n", count, count)
 			if code != 1 || !strings.Contains(stderr, denied) || strings.Count(stderr, "\n") != 1 || !strings.HasSuffix(stdout, wantTotal) || strings.Count(stdout, "\n") != count+2 {
 				t.Fatalf("Ошибка обхода или частичный результат потеряны: код %d, %q, %q", code, stdout, stderr)
 			}
@@ -234,7 +234,7 @@ func TestRunReportsBatchCountsAndDurations(t *testing.T) {
 			}
 			for i := 0; i < test.count; i++ {
 				path := filepath.Join(root, fmt.Sprintf("%03d.txt", i))
-				wantLine := fmt.Sprintf("УСПЕХ: СОЗДАН | путь: %q | строк: 260 | ошибок: %d", path, test.errorsByFile[i])
+				wantLine := fmt.Sprintf("УСПЕХ: СОЗДАН | путь: %q | строк: 260 | ошибок разбора: %d", path, test.errorsByFile[i])
 				if lines[i+1] != wantLine {
 					t.Fatalf("Строка файла %d: %q, требуется %q", i, lines[i+1], wantLine)
 				}
