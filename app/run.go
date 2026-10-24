@@ -43,8 +43,9 @@ const (
 // печатает в os.Stderr, сохраняя возвращённые отсортированные пути для обработки.
 // Создаёт реестры, затем reporter.New и последовательно вызывает processFile.
 // При ошибке подготовки реестров печатает причину и возвращает 1 без обработки.
-// После цикла вызывает reporter.Finish ровно один раз и возвращает его код,
-// повышая 0 до 1 при ошибке discovery. Ноль найденных TXT без ошибки допустим.
+// При ошибке discovery отмечает неполный обход у reporter. После цикла
+// вызывает Finish ровно один раз и возвращает его код.
+// Ноль найденных TXT без ошибки допустим.
 // Run не вызывает os.Exit: возвращённый код передаёт ему пакет main.
 func Run(args []string, version string) int {
 	if version != "" {
@@ -75,12 +76,11 @@ func Run(args []string, version string) int {
 		params: params, version: version, grammars: grammars,
 		diagnostics: diagnosticRegistry, assertions: assertions, reporter: reporter.New(),
 	}
+	if discoveryErr != nil {
+		r.reporter.MarkIncompleteDiscovery()
+	}
 	for _, path := range paths {
 		r.processFile(path)
 	}
-	code := r.reporter.Finish()
-	if code == exitSuccess && discoveryErr != nil {
-		return exitFailure
-	}
-	return code
+	return r.reporter.Finish()
 }

@@ -146,7 +146,7 @@ func TestProcessFileSavesOrReportsOneFailure(t *testing.T) {
 			if len(lines) != 2 || code != wantCode || lines[1] != wantTotal {
 				t.Fatalf("Ожидается один отчёт и согласованный итог: %q, код %d", output, code)
 			}
-			if !strings.HasPrefix(lines[0], test.status+" | ") || !strings.Contains(lines[0], fmt.Sprintf("путь: %q", path)) || !strings.Contains(lines[0], fmt.Sprintf(" | ошибок: %d", test.errors)) || !strings.Contains(lines[0], test.detail) {
+			if !strings.HasPrefix(lines[0], test.status+" | ") || !strings.Contains(lines[0], fmt.Sprintf("путь: %q", path)) || !strings.Contains(lines[0], fmt.Sprintf(" | ошибок разбора: %d", test.parseErrors)) || !strings.Contains(lines[0], test.detail) {
 				t.Fatalf("Неверный отчёт файла: %q", lines[0])
 			}
 			payload, err := os.ReadFile(target)
@@ -186,16 +186,16 @@ func TestProcessFileSavesOrReportsOneFailure(t *testing.T) {
 	}
 }
 
-func TestRecordFailureCountsOnlySeverityErrors(t *testing.T) {
+func TestRecordFailureDoesNotCountUnsavedDiagnostics(t *testing.T) {
 	r := runnerForTest(t)
 	path := filepath.Join(r.params.Path, "failure.txt")
 	result := r.newResult(path, time.Now())
 	for _, severity := range []diagnostics.Severity{diagnostics.SeverityError, diagnostics.SeverityWarning, diagnostics.SeverityRecommendation, diagnostics.SeverityError} {
-		result.Diagnostics = append(result.Diagnostics, model.Diagnostic{SeverityLevel: severity})
+		result.Diagnostics = append(result.Diagnostics, model.Diagnostic{Source: processingID, SeverityLevel: severity})
 	}
 	cause := errors.Join(errors.New("сбой разбора"), errors.New("сбой закрытия"))
 	output := captureRunnerOutput(t, func() { r.recordFailure(result, path, cause) })
-	want := fmt.Sprintf("ОШИБКА: НЕ СОЗДАН | путь: %q | строк: нет данных | ошибок: 2 | причина: сбой разбора\\nсбой закрытия\n", path)
+	want := fmt.Sprintf("ОШИБКА: НЕ СОЗДАН | путь: %q | строк: нет данных | ошибок разбора: 0 | причина: сбой разбора\\nсбой закрытия\n", path)
 	if output != want {
 		t.Fatalf("Отчёт = %q, требуется %q", output, want)
 	}

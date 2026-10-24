@@ -33,7 +33,7 @@ func TestFormatFileLineMatchesContract(t *testing.T) {
 	zero, count := 0, 12
 	failure := errors.New("запись запрещена")
 	cleanup := errors.New("не удалось удалить временный файл")
-	fatal := model.Diagnostic{ID: "fatal", DiagnosticCode: diagnostics.P013, Fatal: true}
+	fatal := model.Diagnostic{ID: "fatal", DiagnosticCode: diagnostics.P013, Fatal: true, Message: "версия не объявлена"}
 	tests := []struct {
 		name    string
 		summary fileSummary
@@ -42,52 +42,52 @@ func TestFormatFileLineMatchesContract(t *testing.T) {
 		{
 			name:    "created empty file",
 			summary: fileSummary{path: "/уроки/пустой.txt", lineCount: &zero, action: storage.ActionCreated},
-			want:    `УСПЕХ: СОЗДАН | путь: "/уроки/пустой.txt" | строк: 0 | ошибок: 0`,
+			want:    `УСПЕХ: СОЗДАН | путь: "/уроки/пустой.txt" | строк: 0 | ошибок разбора: 0`,
 		},
 		{
 			name:    "replaced with diagnostics",
-			summary: fileSummary{path: "/уроки/текст.txt", lineCount: &count, errors: 3, action: storage.ActionReplaced},
-			want:    `УСПЕХ: ЗАМЕНЁН | путь: "/уроки/текст.txt" | строк: 12 | ошибок: 3`,
+			summary: fileSummary{path: "/уроки/текст.txt", lineCount: &count, parseErrors: 3, action: storage.ActionReplaced},
+			want:    `УСПЕХ: ЗАМЕНЁН | путь: "/уроки/текст.txt" | строк: 12 | ошибок разбора: 3`,
 		},
 		{
 			name:    "not written",
-			summary: fileSummary{path: "/уроки/текст.txt", lineCount: &count, errors: 2, action: storage.ActionNotWritten, failure: failure},
-			want:    `ОШИБКА: НЕ СОЗДАН | путь: "/уроки/текст.txt" | строк: 12 | ошибок: 2 | причина: запись запрещена`,
+			summary: fileSummary{path: "/уроки/текст.txt", lineCount: &count, action: storage.ActionNotWritten, failure: failure},
+			want:    `ОШИБКА: НЕ СОЗДАН | путь: "/уроки/текст.txt" | строк: 12 | ошибок разбора: 0 | причина: запись запрещена`,
 		},
 		{
 			name:    "created with cleanup failure",
 			summary: fileSummary{path: "/уроки/текст.txt", lineCount: &zero, action: storage.ActionCreated, failure: cleanup},
-			want:    `ОШИБКА: СОЗДАН | путь: "/уроки/текст.txt" | строк: 0 | ошибок: 0 | причина: не удалось удалить временный файл`,
+			want:    `ОШИБКА: СОЗДАН | путь: "/уроки/текст.txt" | строк: 0 | ошибок разбора: 0 | причина: не удалось удалить временный файл`,
 		},
 		{
 			name:    "replaced with cleanup failure",
-			summary: fileSummary{path: "/уроки/текст.txt", lineCount: &count, errors: 1, action: storage.ActionReplaced, failure: cleanup},
-			want:    `ОШИБКА: ЗАМЕНЁН | путь: "/уроки/текст.txt" | строк: 12 | ошибок: 1 | причина: не удалось удалить временный файл`,
+			summary: fileSummary{path: "/уроки/текст.txt", lineCount: &count, parseErrors: 1, action: storage.ActionReplaced, failure: cleanup},
+			want:    `ОШИБКА: ЗАМЕНЁН | путь: "/уроки/текст.txt" | строк: 12 | ошибок разбора: 1 | причина: не удалось удалить временный файл`,
 		},
 		{
 			name:    "unknown path and count on failure",
-			summary: fileSummary{errors: 1, action: storage.ActionNotWritten, failure: failure},
-			want:    `ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок: 1 | причина: запись запрещена`,
+			summary: fileSummary{action: storage.ActionNotWritten, failure: failure},
+			want:    `ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок разбора: 0 | причина: запись запрещена`,
 		},
 		{
 			name:    "unknown path and count on success",
 			summary: fileSummary{action: storage.ActionCreated},
-			want:    `УСПЕХ: СОЗДАН | путь: неизвестен | строк: нет данных | ошибок: 0`,
+			want:    `УСПЕХ: СОЗДАН | путь: неизвестен | строк: нет данных | ошибок разбора: 0`,
 		},
 		{
 			name:    "quoted path",
 			summary: fileSummary{path: "/уроки/\"цитата\"\\путь\r\n\t.txt", lineCount: &count, action: storage.ActionCreated},
-			want:    `УСПЕХ: СОЗДАН | путь: "/уроки/\"цитата\"\\путь\r\n\t.txt" | строк: 12 | ошибок: 0`,
+			want:    `УСПЕХ: СОЗДАН | путь: "/уроки/\"цитата\"\\путь\r\n\t.txt" | строк: 12 | ошибок разбора: 0`,
 		},
 		{
 			name:    "fatal suffix after failure reason",
-			summary: fileSummary{path: "/уроки/текст.txt", errors: 1, action: storage.ActionNotWritten, failure: failure, fatal: &fatal},
-			want:    `ОШИБКА: НЕ СОЗДАН | путь: "/уроки/текст.txt" | строк: нет данных | ошибок: 1 | причина: запись запрещена | фатальная ошибка: P013`,
+			summary: fileSummary{path: "/уроки/текст.txt", action: storage.ActionNotWritten, failure: failure, fatal: &fatal},
+			want:    `ОШИБКА: НЕ СОЗДАН | путь: "/уроки/текст.txt" | строк: нет данных | ошибок разбора: 0 | причина: запись запрещена | фатальная ошибка: P013`,
 		},
 		{
-			name:    "fatal suffix on success",
-			summary: fileSummary{path: "/уроки/текст.txt", errors: 1, action: storage.ActionReplaced, fatal: &fatal},
-			want:    `УСПЕХ: ЗАМЕНЁН | путь: "/уроки/текст.txt" | строк: нет данных | ошибок: 1 | фатальная ошибка: P013`,
+			name:    "fatal cannot be reported as success",
+			summary: fileSummary{path: "/уроки/текст.txt", action: storage.ActionReplaced, fatal: &fatal},
+			want:    `ОШИБКА: ЗАМЕНЁН | путь: "/уроки/текст.txt" | строк: нет данных | ошибок разбора: 0 | причина: P013: версия не объявлена | фатальная ошибка: P013`,
 		},
 	}
 	for _, test := range tests {
@@ -128,7 +128,7 @@ func TestFormatFileLineEscapesReasonLineBreaks(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			failure := errors.New(test.reason)
 			got := formatFileLine(fileSummary{action: storage.ActionNotWritten, failure: failure})
-			want := "ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок: 0 | причина: " + test.want
+			want := "ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок разбора: 0 | причина: " + test.want
 			if got != want || strings.ContainsAny(got, "\r\n") {
 				t.Errorf("строка = %q, требуется %q", got, want)
 			}

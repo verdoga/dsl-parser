@@ -12,15 +12,15 @@ type fileSummary struct {
 	path string
 	// lineCount — число физических строк; nil, если оно неизвестно.
 	lineCount *int
-	// errors — число диагностик уровня error из storage.Report.ErrorCount.
-	errors int
-	// parseErrors — число нефатальных ошибок текущего разбора без технической IO001.
+	// parseErrors — единый счётчик для строки файла и итогов: нефатальные
+	// ошибки текущего запуска, сохранённые в новом JSON. При отказе записи — 0.
+	// Техническая IO001 и исторические диагностики не учитываются.
 	parseErrors int
 	// action — фактическое действие с JSON из storage.Report.Action.
 	action storage.Action
 	// failure — причина отказа или сбоя из storage.Report.Err.
 	failure error
-	// fatal — ранняя фатальная диагностика либо nil; модель не меняется.
+	// fatal — первая фатальная диагностика текущего запуска либо nil.
 	fatal *model.Diagnostic
 }
 
@@ -63,21 +63,24 @@ func summarizeFile(result model.Result, report storage.Report) fileSummary {
 	summary := fileSummary{
 		path:      report.SourcePath,
 		lineCount: result.Document.LineCount,
-		errors:    report.ErrorCount,
 		action:    report.Action,
 		failure:   report.Err,
 	}
 	entries := currentDiagnostics(result)
-	for _, entry := range entries {
-		if entry.SeverityLevel == diagnostics.SeverityError && !entry.Fatal && entry.DiagnosticCode != diagnostics.IO001 {
-			summary.parseErrors++
+	if isSaved(summary) {
+		for _, entry := range entries {
+			if entry.SeverityLevel == diagnostics.SeverityError && !entry.Fatal && entry.DiagnosticCode != diagnostics.IO001 {
+				summary.parseErrors++
+			}
 		}
 	}
-	if fatal := earlyFatal(entries); fatal != nil {
+	if earlyFatal(entries) != nil {
 		summary.lineCount = nil
-		// Выборка содержит копии; сохраняем указатель на исходную запись модели.
+	}
+	if len(result.Processing) > 0 {
+		currentID := result.Processing[len(result.Processing)-1].ID
 		for i := range result.Diagnostics {
-			if result.Diagnostics[i].ID == fatal.ID {
+			if result.Diagnostics[i].Source == currentID && result.Diagnostics[i].Fatal {
 				summary.fatal = &result.Diagnostics[i]
 				break
 			}
@@ -86,8 +89,16 @@ func summarizeFile(result model.Result, report storage.Report) fileSummary {
 	return summary
 }
 
-// isFailure сообщает, был ли отказ или сбой: true при ненулевой failure
-// либо action=not-written; false при успешной установке JSON.
+// isSaved отражает факт установки JSON текущего запуска. Старый JSON после
+// отказа замены не считается сохранённым результатом; ошибка очистки после
+// установки нового JSON не отменяет сохранение.
+func isSaved(summary fileSummary) bool {
+	return summary.action == storage.ActionCreated || summary.action == storage.ActionReplaced
+}
+
+// isFailure сообщает об отказе обработки, записи или очистки. Фатальная
+// диагностика сама означает сбой, даже если отчёт storage противоречит модели.
+// Несколько причин в одном файле не увеличивают число сбоев повторно.
 func isFailure(summary fileSummary) bool {
-	return summary.failure != nil || summary.action == storage.ActionNotWritten
+	return summary.fatal != nil || summary.failure != nil || summary.action == storage.ActionNotWritten
 }
