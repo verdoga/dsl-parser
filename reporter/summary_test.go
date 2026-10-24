@@ -245,8 +245,8 @@ func TestSummarizeFileSeparatesCurrentParseErrorsAndFailures(t *testing.T) {
 		{name: "custom fatal with misleading success report", entries: []model.Diagnostic{{Source: "current", DiagnosticCode: "CUSTOM001", SeverityLevel: diagnostics.SeverityError, Fatal: true}}, report: storage.Report{Action: storage.ActionReplaced}, failed: true},
 		{name: "IO001", entries: []model.Diagnostic{readError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, failed: true},
 		{name: "fatal and target refusal", entries: []model.Diagnostic{fatalError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureTechnical}, failed: true},
-		{name: "nonfatal and target refusal", entries: []model.Diagnostic{parseError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure}, parseErrors: 1, failed: true},
-		{name: "parse and read diagnostics coexist", entries: []model.Diagnostic{parseError, readError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, parseErrors: 1, failed: true},
+		{name: "nonfatal and target refusal", entries: []model.Diagnostic{parseError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure}, failed: true},
+		{name: "parse and read diagnostics coexist", entries: []model.Diagnostic{parseError, readError}, report: storage.Report{Action: storage.ActionNotWritten, Err: failure, FailureKind: storage.FailureFatalDiagnostics}, failed: true},
 		{name: "all early fatal codes", entries: []model.Diagnostic{
 			{ID: "utf8", Source: "current", DiagnosticCode: diagnostics.P001, SeverityLevel: diagnostics.SeverityError, Fatal: true},
 			{ID: "newline", Source: "current", DiagnosticCode: diagnostics.P002, SeverityLevel: diagnostics.SeverityError, Fatal: true},
@@ -271,6 +271,8 @@ func TestSummarizeFileSeparatesCurrentParseErrorsAndFailures(t *testing.T) {
 		{name: "unknown refusal", report: storage.Report{Action: storage.ActionNotWritten}, failed: true},
 		{name: "created with cleanup failure", report: storage.Report{Action: storage.ActionCreated, Err: failure}, failed: true},
 		{name: "replaced with cleanup failure", report: storage.Report{Action: storage.ActionReplaced, Err: failure}, failed: true},
+		{name: "created nonfatal errors survive cleanup failure", entries: []model.Diagnostic{parseError}, report: storage.Report{Action: storage.ActionCreated, Err: failure}, parseErrors: 1, failed: true},
+		{name: "replaced nonfatal errors survive cleanup failure", entries: []model.Diagnostic{parseError}, report: storage.Report{Action: storage.ActionReplaced, Err: failure}, parseErrors: 1, failed: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			result := model.Result{Processing: []model.Processing{{ID: "old"}, {ID: "current"}}, Diagnostics: test.entries}

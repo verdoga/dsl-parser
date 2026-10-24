@@ -329,7 +329,7 @@ func TestRunCountsSimultaneousParseAndSaveFailures(t *testing.T) {
 	}
 	code, stdout, stderr := captureRunOutput(t, func() int { return Run([]string{root}, "1.0.3") })
 	lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
-	wantTotal := "ИТОГО | всего: 6 | сохранено: 2 | сбоев: 4 | файлов с ошибками разбора: 2 | ошибок разбора: 3"
+	wantTotal := "ИТОГО | всего: 6 | сохранено: 2 | сбоев: 4 | файлов с ошибками разбора: 1 | ошибок разбора: 2"
 	if code != 1 || stderr != "" || len(lines) != 8 || lines[0] != "dsl-parser v1.0.3" || lines[len(lines)-1] != wantTotal || strings.Count(stdout, "фатальная ошибка: P013") != 2 {
 		t.Fatalf("Неверный смешанный отчёт: код %d, stdout=%q, stderr=%q", code, stdout, stderr)
 	}

@@ -62,7 +62,7 @@ func TestReporterRecordsOutcomesAndFinishesRun(t *testing.T) {
 		{
 			report:      storage.Report{SourcePath: "/docs/diagnostics-denied.txt", Action: storage.ActionNotWritten, ErrorCount: 7, FailureKind: storage.FailureTechnical, Err: errors.New("замена запрещена")},
 			diagnostics: parseDiagnostics,
-			want:        `ОШИБКА: НЕ СОЗДАН | путь: "/docs/diagnostics-denied.txt" | строк: 3 | ошибок разбора: 7 | причина: замена запрещена`,
+			want:        `ОШИБКА: НЕ СОЗДАН | путь: "/docs/diagnostics-denied.txt" | строк: 3 | ошибок разбора: 0 | причина: замена запрещена`,
 		},
 		{
 			report: storage.Report{SourcePath: "/docs/multiple-fatal.txt", Action: storage.ActionNotWritten, ErrorCount: 2, FailureKind: storage.FailureFatalDiagnostics, Err: errors.New("несколько фатальных ошибок")},
@@ -87,9 +87,9 @@ func TestReporterRecordsOutcomesAndFinishesRun(t *testing.T) {
 		{name: "replaced with cleanup failure", inputs: []int{5}, wantTotal: "ИТОГО | всего: 1 | сохранено: 1 | сбоев: 1 | файлов с ошибками разбора: 0 | ошибок разбора: 0", wantCode: 1},
 		{name: "fatal DSL fails file", inputs: []int{6}, wantTotal: "ИТОГО | всего: 1 | сохранено: 0 | сбоев: 1 | файлов с ошибками разбора: 0 | ошибок разбора: 0", wantCode: 1},
 		{name: "IO001 is technical", inputs: []int{7}, wantTotal: "ИТОГО | всего: 1 | сохранено: 0 | сбоев: 1 | файлов с ошибками разбора: 0 | ошибок разбора: 0", wantCode: 1},
-		{name: "parse errors and denied write", inputs: []int{8}, wantTotal: "ИТОГО | всего: 1 | сохранено: 0 | сбоев: 1 | файлов с ошибками разбора: 1 | ошибок разбора: 7", wantCode: 1},
+		{name: "parse errors and denied write", inputs: []int{8}, wantTotal: "ИТОГО | всего: 1 | сохранено: 0 | сбоев: 1 | файлов с ошибками разбора: 0 | ошибок разбора: 0", wantCode: 1},
 		{name: "multiple fatal diagnostics fail file once", inputs: []int{9}, wantTotal: "ИТОГО | всего: 1 | сохранено: 0 | сбоев: 1 | файлов с ошибками разбора: 0 | ошибок разбора: 0", wantCode: 1},
-		{name: "mixed sequence", inputs: []int{0, 3, 1, 4, 2, 5, 6, 7, 8}, wantTotal: "ИТОГО | всего: 9 | сохранено: 5 | сбоев: 6 | файлов с ошибками разбора: 2 | ошибок разбора: 14", wantCode: 1},
+		{name: "mixed sequence", inputs: []int{0, 3, 1, 4, 2, 5, 6, 7, 8}, wantTotal: "ИТОГО | всего: 9 | сохранено: 5 | сбоев: 6 | файлов с ошибками разбора: 1 | ошибок разбора: 7", wantCode: 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -116,7 +116,7 @@ func TestReporterRecordsOutcomesAndFinishesRun(t *testing.T) {
 			var total, saved, failures, filesWithParseErrors, parseErrors int
 			n, err := fmt.Sscanf(output, "ИТОГО | всего: %d | сохранено: %d | сбоев: %d | файлов с ошибками разбора: %d | ошибок разбора: %d",
 				&total, &saved, &failures, &filesWithParseErrors, &parseErrors)
-			if err != nil || n != 5 || total != len(test.inputs) || saved > total || failures > total || filesWithParseErrors > total || parseErrors < filesWithParseErrors {
+			if err != nil || n != 5 || total != len(test.inputs) || saved > total || failures > total || filesWithParseErrors > saved || parseErrors < filesWithParseErrors {
 				t.Errorf("несогласованные счётчики: %q; ошибка разбора: %v", output, err)
 			}
 		})
@@ -185,7 +185,7 @@ func TestReporterNotWrittenWithoutReason(t *testing.T) {
 	}
 }
 
-func TestReporterReconcilesCurrentNonfatalErrorsWithFileLine(t *testing.T) {
+func TestReporterExcludesAllDiagnosticsOfUnsavedResult(t *testing.T) {
 	result := model.Result{
 		Processing: []model.Processing{{ID: "old"}, {ID: "current"}},
 		Diagnostics: []model.Diagnostic{
@@ -204,8 +204,8 @@ func TestReporterReconcilesCurrentNonfatalErrorsWithFileLine(t *testing.T) {
 		r.Record(result, storage.Report{Action: storage.ActionNotWritten, ErrorCount: 5, Err: errors.New("отказ")})
 		code = r.Finish()
 	})
-	want := "ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок разбора: 2 | причина: отказ | фатальная ошибка: P001\n" +
-		"ИТОГО | всего: 1 | сохранено: 0 | сбоев: 1 | файлов с ошибками разбора: 1 | ошибок разбора: 2\n"
+	want := "ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок разбора: 0 | причина: отказ | фатальная ошибка: P001\n" +
+		"ИТОГО | всего: 1 | сохранено: 0 | сбоев: 1 | файлов с ошибками разбора: 0 | ошибок разбора: 0\n"
 	if output != want || code != 1 {
 		t.Fatalf("inconsistent categories: exit=%d, %s", code, output)
 	}

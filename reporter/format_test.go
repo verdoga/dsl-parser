@@ -51,8 +51,8 @@ func TestFormatFileLineMatchesContract(t *testing.T) {
 		},
 		{
 			name:    "not written",
-			summary: fileSummary{path: "/уроки/текст.txt", lineCount: &count, parseErrors: 2, action: storage.ActionNotWritten, failure: failure},
-			want:    `ОШИБКА: НЕ СОЗДАН | путь: "/уроки/текст.txt" | строк: 12 | ошибок разбора: 2 | причина: запись запрещена`,
+			summary: fileSummary{path: "/уроки/текст.txt", lineCount: &count, action: storage.ActionNotWritten, failure: failure},
+			want:    `ОШИБКА: НЕ СОЗДАН | путь: "/уроки/текст.txt" | строк: 12 | ошибок разбора: 0 | причина: запись запрещена`,
 		},
 		{
 			name:    "created with cleanup failure",
@@ -66,8 +66,8 @@ func TestFormatFileLineMatchesContract(t *testing.T) {
 		},
 		{
 			name:    "unknown path and count on failure",
-			summary: fileSummary{parseErrors: 1, action: storage.ActionNotWritten, failure: failure},
-			want:    `ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок разбора: 1 | причина: запись запрещена`,
+			summary: fileSummary{action: storage.ActionNotWritten, failure: failure},
+			want:    `ОШИБКА: НЕ СОЗДАН | путь: неизвестен | строк: нет данных | ошибок разбора: 0 | причина: запись запрещена`,
 		},
 		{
 			name:    "unknown path and count on success",
@@ -81,8 +81,8 @@ func TestFormatFileLineMatchesContract(t *testing.T) {
 		},
 		{
 			name:    "fatal suffix after failure reason",
-			summary: fileSummary{path: "/уроки/текст.txt", parseErrors: 1, action: storage.ActionNotWritten, failure: failure, fatal: &fatal},
-			want:    `ОШИБКА: НЕ СОЗДАН | путь: "/уроки/текст.txt" | строк: нет данных | ошибок разбора: 1 | причина: запись запрещена | фатальная ошибка: P013`,
+			summary: fileSummary{path: "/уроки/текст.txt", action: storage.ActionNotWritten, failure: failure, fatal: &fatal},
+			want:    `ОШИБКА: НЕ СОЗДАН | путь: "/уроки/текст.txt" | строк: нет данных | ошибок разбора: 0 | причина: запись запрещена | фатальная ошибка: P013`,
 		},
 		{
 			name:    "fatal cannot be reported as success",

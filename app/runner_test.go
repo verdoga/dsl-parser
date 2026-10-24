@@ -186,7 +186,7 @@ func TestProcessFileSavesOrReportsOneFailure(t *testing.T) {
 	}
 }
 
-func TestRecordFailureCountsOnlySeverityErrors(t *testing.T) {
+func TestRecordFailureDoesNotCountUnsavedDiagnostics(t *testing.T) {
 	r := runnerForTest(t)
 	path := filepath.Join(r.params.Path, "failure.txt")
 	result := r.newResult(path, time.Now())
@@ -195,7 +195,7 @@ func TestRecordFailureCountsOnlySeverityErrors(t *testing.T) {
 	}
 	cause := errors.Join(errors.New("сбой разбора"), errors.New("сбой закрытия"))
 	output := captureRunnerOutput(t, func() { r.recordFailure(result, path, cause) })
-	want := fmt.Sprintf("ОШИБКА: НЕ СОЗДАН | путь: %q | строк: нет данных | ошибок разбора: 2 | причина: сбой разбора\\nсбой закрытия\n", path)
+	want := fmt.Sprintf("ОШИБКА: НЕ СОЗДАН | путь: %q | строк: нет данных | ошибок разбора: 0 | причина: сбой разбора\\nсбой закрытия\n", path)
 	if output != want {
 		t.Fatalf("Отчёт = %q, требуется %q", output, want)
 	}

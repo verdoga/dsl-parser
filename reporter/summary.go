@@ -13,7 +13,8 @@ type fileSummary struct {
 	// lineCount — число физических строк; nil, если оно неизвестно.
 	lineCount *int
 	// parseErrors — единый счётчик для строки файла и итогов: нефатальные
-	// ошибки текущего разбора без технической IO001 и исторических диагностик.
+	// ошибки текущего запуска, сохранённые в новом JSON. При отказе записи — 0.
+	// Техническая IO001 и исторические диагностики не учитываются.
 	parseErrors int
 	// action — фактическое действие с JSON из storage.Report.Action.
 	action storage.Action
@@ -66,9 +67,11 @@ func summarizeFile(result model.Result, report storage.Report) fileSummary {
 		failure:   report.Err,
 	}
 	entries := currentDiagnostics(result)
-	for _, entry := range entries {
-		if entry.SeverityLevel == diagnostics.SeverityError && !entry.Fatal && entry.DiagnosticCode != diagnostics.IO001 {
-			summary.parseErrors++
+	if isSaved(summary) {
+		for _, entry := range entries {
+			if entry.SeverityLevel == diagnostics.SeverityError && !entry.Fatal && entry.DiagnosticCode != diagnostics.IO001 {
+				summary.parseErrors++
+			}
 		}
 	}
 	if earlyFatal(entries) != nil {
@@ -84,6 +87,13 @@ func summarizeFile(result model.Result, report storage.Report) fileSummary {
 		}
 	}
 	return summary
+}
+
+// isSaved отражает факт установки JSON текущего запуска. Старый JSON после
+// отказа замены не считается сохранённым результатом; ошибка очистки после
+// установки нового JSON не отменяет сохранение.
+func isSaved(summary fileSummary) bool {
+	return summary.action == storage.ActionCreated || summary.action == storage.ActionReplaced
 }
 
 // isFailure сообщает об отказе обработки, записи или очистки. Фатальная

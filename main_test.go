@@ -32,7 +32,7 @@ type cliBatch struct {
 	name   string
 	files  []cliSource
 	flags  []string
-	totals [5]int // total, saved, failed files, files with nonfatal errors, nonfatal errors
+	totals [5]int // total, saved, failed files, saved files with nonfatal errors, saved nonfatal errors
 	exit   int
 }
 
@@ -68,7 +68,11 @@ func syntheticBatches() []cliBatch {
 			{name: "denied.txt", text: valid, action: "НЕ СОЗДАН", previous: true},
 			{name: "nonfatal-denied.txt", text: nonfatal, action: "НЕ СОЗДАН", previous: true, parseErrors: 1},
 			{name: "fatal-denied.txt", text: "Text", action: "НЕ СОЗДАН", previous: true, fatalCodes: []string{"P013"}},
-		}, totals: [5]int{6, 2, 4, 2, 3}, exit: 1},
+		}, totals: [5]int{6, 2, 4, 1, 2}, exit: 1},
+		{name: "all nonfatal results refused by existing JSON", files: []cliSource{
+			{name: "a.txt", text: nonfatal + "@unknown\n", action: "НЕ СОЗДАН", previous: true, parseErrors: 2},
+			{name: "b.txt", text: nonfatal + "@unknown\n@unknown\n", action: "НЕ СОЗДАН", previous: true, parseErrors: 3},
+		}, totals: [5]int{2, 0, 2, 0, 0}, exit: 1},
 		{name: "replace with fatal preserving previous JSON", flags: []string{"--replace"}, files: []cliSource{
 			{name: "clean.txt", text: valid, action: "ЗАМЕНЁН", previous: true},
 			{name: "nonfatal.txt", text: nonfatal, action: "ЗАМЕНЁН", previous: true, parseErrors: 1},
@@ -78,7 +82,7 @@ func syntheticBatches() []cliBatch {
 			{name: "clean.txt", text: valid, action: "НЕ СОЗДАН", blockedTarget: true},
 			{name: "nonfatal.txt", text: nonfatal, action: "НЕ СОЗДАН", blockedTarget: true, parseErrors: 1},
 			{name: "z-valid.txt", text: valid, action: "СОЗДАН"},
-		}, totals: [5]int{3, 1, 2, 1, 1}, exit: 1},
+		}, totals: [5]int{3, 1, 2, 0, 0}, exit: 1},
 		{name: "depth selection", flags: []string{"--depth", "0"}, files: []cliSource{
 			{name: "clean.txt", text: valid, action: "СОЗДАН"},
 			{name: "sub/excluded.txt", text: nonfatal},
@@ -126,6 +130,16 @@ func TestCLISyntheticBatches(t *testing.T) {
 				t.Fatalf("expected exit=%d, %q; got exit=%d stdout=%s stderr=%s", batch.exit, wantTotal, code, stdout, stderr)
 			}
 			results := checkBatchFiles(t, batch, root, stdout, true)
+			var savedErrorFiles, savedErrors int
+			for _, result := range results {
+				if len(result.Diagnostics) > 0 {
+					savedErrorFiles++
+				}
+				savedErrors += len(result.Diagnostics)
+			}
+			if savedErrorFiles != batch.totals[3] || savedErrors != batch.totals[4] {
+				t.Fatalf("saved JSON disagrees with error totals: files=%d errors=%d, expected %v", savedErrorFiles, savedErrors, batch.totals)
+			}
 			// An independent reconciliation with the visible per-file rows.
 			var reconciled [5]int
 			for _, line := range lines[1 : len(lines)-1] {
@@ -195,7 +209,7 @@ func TestCLIFileSystemFailures(t *testing.T) {
 				batch.files = append(batch.files, cliSource{name: "unreadable.txt", text: valid, action: "НЕ СОЗДАН", previous: true, fatalCodes: []string{"IO001"}})
 			case "write":
 				batch.files = append(batch.files, cliSource{name: "denied/nonfatal.txt", text: "@dsl-version 1.2\n@unknown\n", action: "НЕ СОЗДАН", parseErrors: 1})
-				batch.totals = [5]int{2, 1, 1, 1, 1}
+				batch.totals = [5]int{2, 1, 1, 0, 0}
 			case "walk":
 				batch.files = append(batch.files, cliSource{name: "denied/hidden.txt", text: valid})
 				batch.totals = [5]int{1, 1, 0, 0, 0}
@@ -337,7 +351,11 @@ func checkBatchFiles(t *testing.T, batch cliBatch, root, stdout string, current 
 			if !strings.HasPrefix(row, status+": "+file.action+" |") {
 				t.Fatalf("unexpected file outcome: %s", row)
 			}
-			if current && !strings.Contains(row+" |", fmt.Sprintf(" | ошибок разбора: %d |", file.parseErrors)) {
+			wantReportedErrors := file.parseErrors
+			if file.action == "НЕ СОЗДАН" {
+				wantReportedErrors = 0
+			}
+			if current && !strings.Contains(row+" |", fmt.Sprintf(" | ошибок разбора: %d |", wantReportedErrors)) {
 				t.Fatalf("unexpected nonfatal errors: %s", row)
 			}
 			for _, code := range file.fatalCodes {
